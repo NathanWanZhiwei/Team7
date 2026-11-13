@@ -2,6 +2,8 @@ import 'server-only';
 
 import Database from 'better-sqlite3';
 import { join } from 'node:path';
+import { generateCalendarGrid } from './calendar';
+import { HOLIDAYS_SCHEMA, seedHolidays } from './holidays';
 import { PRIORITY_ORDER, PRIORITY_VALUES } from './priority';
 import { calculateNextDueDate } from './recurrence';
 import { isReminderMinutes } from './reminder-options';
@@ -84,6 +86,20 @@ export interface DueReminder extends Todo {
   reminder_revision: number;
 }
 
+export interface Holiday {
+  id: number;
+  date: string;
+  name: string;
+}
+
+export interface CalendarDay {
+  date: string;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  isPast: boolean;
+  isWeekend: boolean;
+}
+
 export interface Subtask {
   id: number;
   todo_id: number;
@@ -150,6 +166,8 @@ const databasePath = process.env.TODO_DATABASE_PATH ?? join(process.cwd(), 'todo
 const db = new Database(databasePath);
 db.pragma('foreign_keys = ON');
 db.pragma('journal_mode = WAL');
+db.exec(HOLIDAYS_SCHEMA);
+seedHolidays(db);
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -417,6 +435,18 @@ export const userDB = {
     const user = userDB.findById(Number(result.lastInsertRowid));
     if (!user) throw new Error('User creation did not return a user');
     return user;
+  },
+};
+
+export const holidayDB = {
+  findAll(): Holiday[] {
+    return db.prepare('SELECT id, date, name FROM holidays ORDER BY date').all() as Holiday[];
+  },
+  findByMonth(year: number, month: number): Holiday[] {
+    const grid = generateCalendarGrid(year, month);
+    return db.prepare(
+      'SELECT id, date, name FROM holidays WHERE date >= ? AND date <= ? ORDER BY date',
+    ).all(grid[0].date, grid[41].date) as Holiday[];
   },
 };
 

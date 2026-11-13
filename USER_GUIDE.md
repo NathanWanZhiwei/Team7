@@ -949,16 +949,16 @@ Visualize your todos on a monthly calendar to see your schedule at a glance, spo
 
 #### Navigation
 - **To Calendar**: Click "Calendar" button
-- **Back to List**: Browser back button or navigate to home
-- **Always available**: Calendar button visible on both pages
+- **Back to List**: Click **List** in the calendar header
+- **Bookmarked month**: Use `/calendar?month=2026-03`; refreshing preserves the month
 
 ### Calendar Features
 
 #### Monthly View
 - Full month calendar grid
 - Current month displayed by default
-- Days organized in week rows
-- Week starts on Sunday (configurable)
+- Exactly six fixed week rows (42 dates), including dimmed adjacent-month dates
+- Week starts on Sunday
 
 #### Todo Display on Calendar
 - Todos appear on their due date
@@ -968,12 +968,17 @@ Visualize your todos on a monthly calendar to see your schedule at a glance, spo
   - 🔵 Low priority in blue
 - Todo titles shown on date cells
 - Multiple todos stack on same date
+- A count badge shows the total; up to three pills are visible, followed by "+X more"
+- Click a date for its full read-only todo list and holiday name
+- Undated todos stay in list view; completed todos are struck through
 
 #### Holiday Integration
-- Public holidays displayed (if configured)
+- Official Singapore public holidays for 2025-2027 are seeded automatically
 - Special styling for holidays
 - Holiday names shown
 - Helps with planning around holidays
+- In-lieu dates are conditional on Sunday being your rest day, as labeled
+- Other years remain navigable but have no preloaded holidays
 
 #### Visual Design
 - Clean, minimal interface
@@ -988,6 +993,7 @@ Visualize your todos on a monthly calendar to see your schedule at a glance, spo
 - Current month/year display
 - Next month button (▶)
 - Today button (jumps to current month)
+- Navigation replaces the URL; invalid month parameters fall back to the current Singapore month
 
 #### Date Selection
 - Click any date to view details
@@ -998,15 +1004,14 @@ Visualize your todos on a monthly calendar to see your schedule at a glance, spo
 ### Integration with Main App
 
 #### Data Synchronization
-- Calendar shows same todos as list view
-- Changes sync automatically
-- Real-time updates
+- Calendar reads the same persisted todos as list view
+- Switching to calendar or reloading it fetches the latest todos
+- Only actual recurring instances are shown, not projected future occurrences
 - No separate data storage
 
 #### Filtering
-- Calendar respects active filters (if applicable)
-- Shows only relevant todos
-- Updates when filters change
+- Calendar always shows all your due-dated todos
+- List-view search, tag, and priority filters do not apply
 
 ### Use Cases
 

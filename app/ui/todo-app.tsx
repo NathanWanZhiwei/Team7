@@ -12,6 +12,7 @@ import {
 import { sectionTodos } from '@/lib/todo-sorting';
 import { calculateProgress } from '@/lib/subtasks';
 import { tagBackground } from '@/lib/tag-validation';
+import { requestJson } from '@/lib/client-api';
 import { LogoutButton } from './logout-button';
 import { useNotifications } from '@/lib/hooks/useNotifications';
 
@@ -36,20 +37,6 @@ const dueDateFormatter = new Intl.DateTimeFormat('en-SG', {
   timeStyle: 'short',
   timeZone: 'Asia/Singapore',
 });
-
-async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  const payload: unknown = await response.json();
-  if (!response.ok) {
-    const message =
-      payload && typeof payload === 'object' && 'error' in payload &&
-      typeof payload.error === 'string'
-        ? payload.error
-        : `Request failed (${response.status})`;
-    throw new Error(message);
-  }
-  return payload as T;
-}
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -940,6 +927,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
             <p className="muted">Signed in as <strong>{username}</strong></p>
           </div>
           <div className="todo-header-actions">
+            <Link className="calendar-navigation-link" href="/calendar">Calendar</Link>
             <button
               type="button"
               className={

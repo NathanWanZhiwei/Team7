@@ -4,6 +4,24 @@ This walkthrough will guide you from zero to running the Todo App with GitHub Co
 
 Reference : https://ai-sdlc-workshop-day1-production.up.railway.app/login
 
+## Implemented calendar view
+
+Select **Calendar** to open the protected `/calendar` month view. It shows all
+due-dated todos in Singapore time, regardless of list filters. Navigate with
+Previous/Today/Next; `?month=YYYY-MM` is bookmarkable and navigation replaces the
+URL. Every month has six fixed Sun-Sat rows. Priority colors match the list;
+completed items are struck through, and dates with more than three todos show
+an overflow indicator. Select a date for a keyboard-accessible, read-only summary.
+
+Singapore holidays for **2025-2027** are seeded automatically from the
+[Ministry of Manpower calendar](https://www.mom.gov.sg/employment-practices/public-holidays).
+Conditional in-lieu dates are labeled explicitly. Other years remain navigable,
+but their holidays are not populated. To seed a standalone database, run
+`npx tsx scripts/seed-holidays.ts`; it honors `TODO_DATABASE_PATH` and is idempotent.
+Update `lib/holidays.ts` only from verified official dates as new years are published.
+
+After building, run `npm run test:e2e -- 12-calendar` for calendar browser/API checks.
+
 ## Implemented export and import
 
 Use **Export JSON** for a versioned backup of all your todos, including subtasks

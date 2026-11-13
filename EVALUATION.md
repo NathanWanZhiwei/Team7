@@ -332,38 +332,43 @@ is still pending.
 ---
 
 ### ✅ Feature 10: Calendar View
-**Status:** ⬜ Not Started | ⬜ In Progress | ⬜ Complete | ⬜ Verified
+**Status:** ⬜ Not Started | ⬜ In Progress | ☑ Complete | ⬜ Verified
 
 **Implementation Checklist:**
-- [ ] Database: `holidays` table seeded with Singapore holidays
-- [ ] API endpoint: `GET /api/holidays`
-- [ ] Calendar page route: `/calendar`
-- [ ] Calendar generation logic (weeks/days)
-- [ ] Month navigation (prev/next/today buttons)
-- [ ] Day headers (Sun-Sat)
-- [ ] Current day highlighted
-- [ ] Weekend styling
-- [ ] Holiday display with names
-- [ ] Todos appear on due dates
-- [ ] Todo count badge on days
-- [ ] Click day to view todos modal
-- [ ] URL state management (`?month=YYYY-MM`)
+- [x] Database: `holidays` table seeded with Singapore holidays
+- [x] API endpoint: `GET /api/holidays`
+- [x] Calendar page route: `/calendar`
+- [x] Calendar generation logic (weeks/days)
+- [x] Month navigation (prev/next/today buttons)
+- [x] Day headers (Sun-Sat)
+- [x] Current day highlighted
+- [x] Weekend styling
+- [x] Holiday display with names
+- [x] Todos appear on due dates
+- [x] Todo count badge on days
+- [x] Click day to view todos modal
+- [x] URL state management (`?month=YYYY-MM`)
 
 **Testing:**
-- [ ] E2E test: Calendar loads current month
-- [ ] E2E test: Navigate to prev/next month
-- [ ] E2E test: Today button works
-- [ ] E2E test: Todo appears on correct date
-- [ ] E2E test: Holiday appears on correct date
-- [ ] E2E test: Click day opens modal
-- [ ] Unit test: Calendar generation
+- [x] E2E test: Calendar loads current month
+- [x] E2E test: Navigate to prev/next month
+- [x] E2E test: Today button works
+- [x] E2E test: Todo appears on correct date
+- [x] E2E test: Holiday appears on correct date
+- [x] E2E test: Click day opens modal
+- [x] Unit test: Calendar generation
 
 **Acceptance Criteria:**
-- [ ] Calendar displays correctly
-- [ ] Holidays shown
-- [ ] Todos on correct dates
-- [ ] Navigation works
-- [ ] Modal shows day's todos
+- [x] Calendar displays correctly
+- [x] Holidays shown
+- [x] Todos on correct dates
+- [x] Navigation works
+- [x] Modal shows day's todos
+
+Calendar helper line coverage is 100%. Browser checks cover light/dark themes,
+keyboard focus restoration, user isolation, fixed grid height, responsive layout,
+and Singapore date boundaries. Holiday seeds cover the official 2025-2027 dates.
+Independent QA sign-off remains pending.
 
 ---
 

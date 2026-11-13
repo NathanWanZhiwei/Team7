@@ -176,6 +176,15 @@ button.secondary {
   white-space: nowrap;
 }
 
+.calendar-navigation-link {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #6d28d9;
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+}
+
 .transfer-toolbar {
   margin-bottom: 24px;
 }
