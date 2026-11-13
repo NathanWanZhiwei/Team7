@@ -1,0 +1,153 @@
+:root {
+  color-scheme: light;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #f3f5f8;
+  color: #172033;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+a {
+  color: #2257d6;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.card {
+  width: min(100%, 440px);
+  padding: 32px;
+  border: 1px solid #e1e6ef;
+  border-radius: 16px;
+  background: white;
+  box-shadow: 0 16px 50px #1d2b4414;
+}
+
+.card h1 {
+  margin: 0 0 8px;
+  font-size: 1.65rem;
+}
+
+.muted {
+  color: #5f6b7d;
+  line-height: 1.5;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+  margin: 24px 0 16px;
+  font-weight: 600;
+}
+
+.field input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #bdc7d7;
+  border-radius: 8px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.actions button {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: #2459d3;
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.actions button.secondary {
+  border: 1px solid #c5cede;
+  background: white;
+  color: #24334e;
+}
+
+button.secondary {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #c5cede;
+  border-radius: 8px;
+  background: white;
+  color: #24334e;
+  cursor: pointer;
+}
+
+.actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.alert {
+  margin: 16px 0 0;
+  color: #a32121;
+}
+
+.success {
+  color: #17653b;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    background: #101725;
+    color: #edf2fb;
+  }
+
+  .card {
+    border-color: #303d51;
+    background: #182336;
+  }
+
+  .muted {
+    color: #b4bfd0;
+  }
+
+  .field input {
+    border-color: #4a5870;
+    background: #101725;
+    color: #edf2fb;
+  }
+
+  .actions button.secondary {
+    border-color: #4a5870;
+    background: #182336;
+    color: #edf2fb;
+  }
+
+  button.secondary {
+    border-color: #4a5870;
+    background: #182336;
+    color: #edf2fb;
+  }
+}
