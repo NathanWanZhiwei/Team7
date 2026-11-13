@@ -589,8 +589,10 @@ Current Filters:
 #### Preset Storage
 - **Location**: Browser localStorage
 - **Persistence**: Survives page refresh
-- **User-specific**: Per browser/device
+- **User-specific**: Separate saved filters for each signed-in account on this browser/device
 - **Format**: JSON object
+- Saved filter names and values are kept on this device and are not synced between devices.
+- Invalid saved data is ignored; storage errors are shown rather than silently saving or deleting a filter.
 
 ### Applying Saved Presets
 

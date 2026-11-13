@@ -44,3 +44,11 @@ export async function createTodo(page: Page, title: string, tags: string[] = [])
   expect((await response).status()).toBe(201);
   await expect(page.locator('.todo-row').filter({ hasText: title })).toBeVisible();
 }
+
+export async function addSubtask(page: Page, todoTitle: string, subtaskTitle: string) {
+  const row = page.locator('.todo-row').filter({ hasText: todoTitle });
+  await row.getByRole('button', { name: /Subtasks/ }).click();
+  await row.getByLabel('New subtask title').fill(subtaskTitle);
+  await row.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(row.getByText(subtaskTitle, { exact: true })).toBeVisible();
+}

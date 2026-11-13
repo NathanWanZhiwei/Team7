@@ -12,10 +12,21 @@ import {
 import { sectionTodos } from '@/lib/todo-sorting';
 import { calculateProgress } from '@/lib/subtasks';
 import { tagBackground } from '@/lib/tag-validation';
+import {
+  applyFilters,
+  DEFAULT_FILTER_STATE,
+  hasActiveFilters,
+  MAX_FILTER_SEARCH_LENGTH,
+  MAX_PRESET_NAME_LENGTH,
+  type FilterPreset,
+  type FilterState,
+} from '@/lib/filters';
+import { deletePreset, loadPresets, savePreset } from '@/lib/filter-presets';
+import { useDebounce } from '@/lib/hooks/useDebounce';
+import { formatSingaporeDateTime, getSingaporeNow } from '@/lib/timezone';
 import { LogoutButton } from './logout-button';
 import { useNotifications } from '@/lib/hooks/useNotifications';
 
-type PriorityFilter = Priority | 'all';
 type TodoUpdateResponse = { todo: Todo; nextInstance?: Todo };
 
 const priorityLabels: Record<Priority, string> = {
@@ -53,6 +64,121 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function SearchBar({
+  value,
+  onChange,
+  onClear,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="filter-search">
+      <label className="todo-field" htmlFor="todo-search">Search todos and subtasks</label>
+      <div className="filter-search-input-wrap">
+        <span aria-hidden="true">🔍</span>
+        <input
+          id="todo-search"
+          type="text"
+          role="searchbox"
+          value={value}
+          maxLength={MAX_FILTER_SEARCH_LENGTH}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Search todos and subtasks..."
+        />
+        {value && (
+          <button type="button" aria-label="Clear search" onClick={onClear}>
+            ✕
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SavedPresetPill({
+  preset,
+  onApply,
+  onDelete,
+  disabled,
+}: {
+  preset: FilterPreset;
+  onApply: () => void;
+  onDelete: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <span className="filter-preset-pill">
+      <button type="button" disabled={disabled} onClick={onApply}>{preset.name}</button>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-label={`Delete preset ${preset.name}`}
+        onClick={onDelete}
+      >
+        ✕
+      </button>
+    </span>
+  );
+}
+
+function SaveFilterDialog({
+  preview,
+  error,
+  onSave,
+  onClose,
+}: {
+  preview: string;
+  error: string | null;
+  onSave: (name: string) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState('');
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => element?.close();
+  }, []);
+
+  return (
+    <dialog
+      ref={dialog}
+      className="todo-modal"
+      aria-labelledby="save-filter-heading"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+    >
+      <h2 id="save-filter-heading">Save filter</h2>
+      <p className="muted">Current filters: {preview}</p>
+      {error && <p className="todo-error" role="alert">{error}</p>}
+      <form className="todo-form todo-edit-form" onSubmit={(event) => {
+        event.preventDefault();
+        onSave(name);
+      }}>
+        <label className="todo-field">
+          Filter name
+          <input
+            autoFocus
+            required
+            maxLength={MAX_PRESET_NAME_LENGTH}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </label>
+        <div className="todo-modal-actions">
+          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" disabled={!name.trim()}>Save</button>
+        </div>
+      </form>
+    </dialog>
+  );
 }
 
 function singaporeInputValue(value: string | null): string {
@@ -586,9 +712,13 @@ export function TodoApp({ userId, username }: { userId: number; username: string
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
+  const [filterState, setFilterState] = useState<FilterState>(DEFAULT_FILTER_STATE);
+  const [debouncedSearch, setDebouncedSearch] = useDebounce(filterState.search, 300);
+  const [advancedExpanded, setAdvancedExpanded] = useState(false);
+  const [presets, setPresets] = useState<FilterPreset[]>([]);
+  const [presetError, setPresetError] = useState<string | null>(null);
+  const [savingFilter, setSavingFilter] = useState(false);
   const [tags, setTags] = useState<Tag[]>([]);
-  const [tagFilter, setTagFilter] = useState<number | null>(null);
   const [managingTags, setManagingTags] = useState(false);
   const [createTagIds, setCreateTagIds] = useState<number[]>([]);
   const [editTagIds, setEditTagIds] = useState<number[]>([]);
@@ -633,6 +763,18 @@ export function TodoApp({ userId, username }: { userId: number; username: string
   }, []);
 
   useEffect(() => {
+    setFilterState(DEFAULT_FILTER_STATE);
+    setDebouncedSearch('');
+    setPresets([]);
+    setPresetError(null);
+    try {
+      setPresets(loadPresets(userId));
+    } catch (loadError) {
+      setPresetError(getErrorMessage(loadError, 'Could not load saved filters.'));
+    }
+  }, [userId, setDebouncedSearch]);
+
+  useEffect(() => {
     if (!editingTodo) return;
     function handleEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') setEditingTodo(null);
@@ -641,13 +783,99 @@ export function TodoApp({ userId, username }: { userId: number; username: string
     return () => window.removeEventListener('keydown', handleEscape);
   }, [editingTodo]);
 
+  const appliedFilters = useMemo<FilterState>(() => ({
+    ...filterState,
+    search: debouncedSearch,
+  }), [
+    debouncedSearch,
+    filterState.priority,
+    filterState.tagId,
+    filterState.completion,
+    filterState.dueDateFrom,
+    filterState.dueDateTo,
+  ]);
+  const filteredTodos = useMemo(
+    () => applyFilters(todos, appliedFilters),
+    [todos, appliedFilters],
+  );
   const sections = useMemo(() => {
-    const visibleTodos = todos.filter((todo) =>
-      (priorityFilter === 'all' || todo.priority === priorityFilter) &&
-      (tagFilter === null || todo.tags?.some((tag) => tag.id === tagFilter)),
-    );
-    return sectionTodos(visibleTodos);
-  }, [todos, priorityFilter, tagFilter]);
+    return sectionTodos(filteredTodos);
+  }, [filteredTodos]);
+
+  const filterPreview = [
+    filterState.search.trim() ? `Search: "${filterState.search.trim()}"` : null,
+    filterState.priority !== 'all' ? `Priority: ${priorityLabels[filterState.priority]}` : null,
+    filterState.tagId !== 'all'
+      ? `Tag: ${tags.find((tag) => tag.id === filterState.tagId)?.name ?? 'Deleted tag'}`
+      : null,
+    filterState.completion !== 'all'
+      ? `Completion: ${filterState.completion === 'completed' ? 'Completed' : 'Incomplete'}`
+      : null,
+    filterState.dueDateFrom || filterState.dueDateTo
+      ? `Date: ${filterState.dueDateFrom ?? 'Any'} to ${filterState.dueDateTo ?? 'Any'}`
+      : null,
+  ].filter((part): part is string => part !== null).join(' · ');
+
+  function updateSearch(value: string) {
+    setFilterState((current) => ({ ...current, search: value }));
+  }
+
+  function clearSearch() {
+    setFilterState((current) => ({ ...current, search: '' }));
+    setDebouncedSearch('');
+  }
+
+  function clearAllFilters() {
+    setFilterState(DEFAULT_FILTER_STATE);
+    setDebouncedSearch('');
+    setPresetError(null);
+  }
+
+  function applySavedPreset(preset: FilterPreset) {
+    const tagExists = preset.filters.tagId === 'all' ||
+      tags.some((tag) => tag.id === preset.filters.tagId);
+    const nextFilters: FilterState = {
+      ...preset.filters,
+      tagId: tagExists ? preset.filters.tagId : 'all',
+    };
+    setFilterState(nextFilters);
+    setDebouncedSearch(nextFilters.search);
+  }
+
+  function saveCurrentFilter(name: string) {
+    const preset: FilterPreset = {
+      id: crypto.randomUUID(),
+      name: name.trim(),
+      filters: { ...filterState },
+      createdAt: formatSingaporeDateTime(getSingaporeNow()),
+    };
+    try {
+      setPresets(savePreset(userId, preset));
+      setPresetError(null);
+      setSavingFilter(false);
+    } catch (saveError) {
+      setPresetError(getErrorMessage(saveError, 'Could not save filter preset.'));
+    }
+  }
+
+  function removePreset(preset: FilterPreset) {
+    if (!window.confirm(`Delete saved filter "${preset.name}"?`)) return;
+    try {
+      setPresets(deletePreset(userId, preset.id));
+      setPresetError(null);
+    } catch (deleteError) {
+      setPresetError(getErrorMessage(deleteError, 'Could not delete filter preset.'));
+    }
+  }
+
+  useEffect(() => {
+    if (loading || filterState.tagId === 'all') return;
+    if (!tags.some((tag) => tag.id === filterState.tagId)) {
+      setFilterState((current) =>
+        current.tagId === filterState.tagId ? { ...current, tagId: 'all' } : current,
+      );
+    }
+  }, [filterState.tagId, loading, tags]);
 
   async function saveTag(id: number | null, name: string, color: string) {
     const saved = await requestJson<Tag>(id === null ? '/api/tags' : `/api/tags/${id}`, {
@@ -670,7 +898,9 @@ export function TodoApp({ userId, username }: { userId: number; username: string
     })));
     setCreateTagIds((current) => current.filter((id) => id !== tag.id));
     setEditTagIds((current) => current.filter((id) => id !== tag.id));
-    setTagFilter((current) => current === tag.id ? null : current);
+    setFilterState((current) =>
+      current.tagId === tag.id ? { ...current, tagId: 'all' } : current,
+    );
   }
 
   async function createTodo(event: FormEvent<HTMLFormElement>) {
@@ -933,6 +1163,11 @@ export function TodoApp({ userId, username }: { userId: number; username: string
         </section>
 
         <section className="todo-card todo-list-card" aria-labelledby="todo-list-heading">
+          <SearchBar
+            value={filterState.search}
+            onChange={updateSearch}
+            onClear={clearSearch}
+          />
           <div className="todo-list-toolbar">
             <div>
               <h2 id="todo-list-heading">Your list</h2>
@@ -942,10 +1177,11 @@ export function TodoApp({ userId, username }: { userId: number; username: string
               Priority filter
               <select
                 aria-label="Filter by priority"
-                value={priorityFilter}
-                onChange={(event) =>
-                  setPriorityFilter(event.target.value as PriorityFilter)
-                }
+                value={filterState.priority}
+                onChange={(event) => setFilterState((current) => ({
+                  ...current,
+                  priority: event.target.value as Priority | 'all',
+                }))}
               >
                 <option value="all">All Priorities</option>
                 <option value="high">High Priority</option>
@@ -953,54 +1189,161 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 <option value="low">Low Priority</option>
               </select>
             </label>
-            <label className="todo-filter">
-              Tag filter
-              <select aria-label="Filter by tag" value={tagFilter ?? ''}
-                onChange={(event) => setTagFilter(event.target.value ? Number(event.target.value) : null)}>
-                <option value="">All Tags</option>
-                {tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
-              </select>
-            </label>
+            {tags.length > 0 && (
+              <label className="todo-filter">
+                Tag filter
+                <select
+                  aria-label="Filter by tag"
+                  value={filterState.tagId === 'all' ? '' : filterState.tagId}
+                  onChange={(event) => setFilterState((current) => ({
+                    ...current,
+                    tagId: event.target.value === '' ? 'all' : Number(event.target.value),
+                  }))}
+                >
+                  <option value="">All Tags</option>
+                  {tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
+                </select>
+              </label>
+            )}
+            <button
+              type="button"
+              className={`filter-advanced-toggle${advancedExpanded ? ' filter-advanced-toggle--active' : ''}`}
+              aria-expanded={advancedExpanded}
+              onClick={() => setAdvancedExpanded((expanded) => !expanded)}
+            >
+              {advancedExpanded ? '▼ Advanced' : '▶ Advanced'}
+            </button>
           </div>
+
+          {hasActiveFilters(filterState) && (
+            <div className="filter-actions">
+              <button type="button" className="filter-clear-button" onClick={clearAllFilters}>
+                Clear All
+              </button>
+              <button
+                type="button"
+                className="filter-save-button"
+                onClick={() => {
+                  setPresetError(null);
+                  setSavingFilter(true);
+                }}
+              >
+                💾 Save Filter
+              </button>
+            </div>
+          )}
+
+          {advancedExpanded && (
+            <div className="filter-advanced-panel">
+              <label className="todo-filter">
+                Completion status
+                <select
+                  aria-label="Filter by completion status"
+                  value={filterState.completion}
+                  onChange={(event) => setFilterState((current) => ({
+                    ...current,
+                    completion: event.target.value as FilterState['completion'],
+                  }))}
+                >
+                  <option value="all">All Todos</option>
+                  <option value="incomplete">Incomplete Only</option>
+                  <option value="completed">Completed Only</option>
+                </select>
+              </label>
+              <label className="todo-filter">
+                Due Date From
+                <input
+                  aria-label="Due Date From"
+                  type="date"
+                  value={filterState.dueDateFrom ?? ''}
+                  onChange={(event) => setFilterState((current) => ({
+                    ...current,
+                    dueDateFrom: event.target.value || null,
+                  }))}
+                />
+              </label>
+              <label className="todo-filter">
+                Due Date To
+                <input
+                  aria-label="Due Date To"
+                  type="date"
+                  value={filterState.dueDateTo ?? ''}
+                  onChange={(event) => setFilterState((current) => ({
+                    ...current,
+                    dueDateTo: event.target.value || null,
+                  }))}
+                />
+              </label>
+              <div className="filter-saved-presets" aria-label="Saved filter presets">
+                <h3>Saved Filter Presets</h3>
+                {presetError && <p className="todo-error" role="alert">{presetError}</p>}
+                {presets.length > 0 ? (
+                  <div className="filter-preset-list">
+                    {presets.map((preset) => (
+                      <SavedPresetPill
+                        key={preset.id}
+                        preset={preset}
+                        onApply={() => applySavedPreset(preset)}
+                        onDelete={() => removePreset(preset)}
+                        disabled={loading}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="todo-empty">No saved filters.</p>
+                )}
+              </div>
+            </div>
+          )}
 
           {error && <p className="todo-error" role="alert">{error}</p>}
           {loading ? (
             <p className="todo-empty" role="status">Loading todos…</p>
+          ) : todos.length === 0 ? (
+            <p className="todo-empty" role="status">You have no todos yet.</p>
+          ) : filteredTodos.length === 0 ? (
+            <p className="todo-empty" role="status">No todos match your filters.</p>
           ) : (
             <div className="todo-sections">
-              <TodoSection
-                title="Overdue"
-                todos={sections.overdue}
-                busyId={busyId}
-                onToggle={(todo, completed) => void updateTodo(todo.id, { completed })}
-                onEdit={startEditing}
-                onDelete={(todo) => void deleteTodo(todo)}
-                onTagFilter={setTagFilter}
-                onSubtasksChange={updateTodoSubtasks}
-                onError={setError}
-              />
-              <TodoSection
-                title="Pending"
-                todos={sections.pending}
-                busyId={busyId}
-                onToggle={(todo, completed) => void updateTodo(todo.id, { completed })}
-                onEdit={startEditing}
-                onDelete={(todo) => void deleteTodo(todo)}
-                onTagFilter={setTagFilter}
-                onSubtasksChange={updateTodoSubtasks}
-                onError={setError}
-              />
-              <TodoSection
-                title="Completed"
-                todos={sections.completed}
-                busyId={busyId}
-                onToggle={(todo, completed) => void updateTodo(todo.id, { completed })}
-                onEdit={startEditing}
-                onDelete={(todo) => void deleteTodo(todo)}
-                onTagFilter={setTagFilter}
-                onSubtasksChange={updateTodoSubtasks}
-                onError={setError}
-              />
+              {sections.overdue.length > 0 && (
+                <TodoSection
+                  title="Overdue"
+                  todos={sections.overdue}
+                  busyId={busyId}
+                  onToggle={(todo, completed) => void updateTodo(todo.id, { completed })}
+                  onEdit={startEditing}
+                  onDelete={(todo) => void deleteTodo(todo)}
+                  onTagFilter={(tagId) => setFilterState((current) => ({ ...current, tagId }))}
+                  onSubtasksChange={updateTodoSubtasks}
+                  onError={setError}
+                />
+              )}
+              {sections.pending.length > 0 && (
+                <TodoSection
+                  title="Pending"
+                  todos={sections.pending}
+                  busyId={busyId}
+                  onToggle={(todo, completed) => void updateTodo(todo.id, { completed })}
+                  onEdit={startEditing}
+                  onDelete={(todo) => void deleteTodo(todo)}
+                  onTagFilter={(tagId) => setFilterState((current) => ({ ...current, tagId }))}
+                  onSubtasksChange={updateTodoSubtasks}
+                  onError={setError}
+                />
+              )}
+              {sections.completed.length > 0 && (
+                <TodoSection
+                  title="Completed"
+                  todos={sections.completed}
+                  busyId={busyId}
+                  onToggle={(todo, completed) => void updateTodo(todo.id, { completed })}
+                  onEdit={startEditing}
+                  onDelete={(todo) => void deleteTodo(todo)}
+                  onTagFilter={(tagId) => setFilterState((current) => ({ ...current, tagId }))}
+                  onSubtasksChange={updateTodoSubtasks}
+                  onError={setError}
+                />
+              )}
             </div>
           )}
         </section>
@@ -1094,6 +1437,14 @@ export function TodoApp({ userId, username }: { userId: number; username: string
             </form>
           </section>
         </div>
+      )}
+      {savingFilter && (
+        <SaveFilterDialog
+          preview={filterPreview || 'All todos'}
+          error={presetError}
+          onSave={saveCurrentFilter}
+          onClose={() => setSavingFilter(false)}
+        />
       )}
       {managingTags && <ManageTags tags={tags} onSave={saveTag} onDelete={deleteTag}
         onClose={() => setManagingTags(false)} />}

@@ -96,7 +96,7 @@ export interface Todo {
 
 ```typescript
 export interface FilterState {
-  search: string;                 // raw (non-debounced) input value
+  search: string;                 // raw (non-debounced) input value, at most 200 characters
   priority: Priority | 'all';
   tagId: number | 'all';
   completion: 'all' | 'incomplete' | 'completed';
@@ -204,39 +204,40 @@ export function useDebounce<T>(value: T, delayMs = 300): T {
 ```typescript
 export interface FilterPreset {
   id: string;        // crypto.randomUUID()
-  name: string;
+  name: string;      // trimmed, 1–80 characters
   filters: FilterState;
   createdAt: string; // ISO, from getSingaporeNow()
 }
 
-const PRESETS_KEY = 'todo-app:filter-presets';
+const PRESETS_KEY = (userId: number) => `todo-app:filter-presets:${userId}`;
 
-export function loadPresets(): FilterPreset[] {
+export function loadPresets(userId: number): FilterPreset[] {
+  const raw = localStorage.getItem(PRESETS_KEY(userId));
+  if (!raw || raw.length > 100_000) return [];
+  let parsed: unknown;
   try {
-    const raw = localStorage.getItem(PRESETS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    console.error('Failed to load filter presets:', error);
+    parsed = JSON.parse(raw);
+  } catch {
     return [];
   }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(isFilterPreset).slice(0, 50);
 }
 
-export function savePreset(preset: FilterPreset): FilterPreset[] {
-  const presets = [...loadPresets(), preset];
-  localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+export function savePreset(userId: number, preset: FilterPreset): FilterPreset[] {
+  const presets = [...loadPresets(userId), preset];
+  localStorage.setItem(PRESETS_KEY(userId), JSON.stringify(presets));
   return presets;
 }
 
-export function deletePreset(id: string): FilterPreset[] {
-  const presets = loadPresets().filter((p) => p.id !== id);
-  localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+export function deletePreset(userId: number, id: string): FilterPreset[] {
+  const presets = loadPresets(userId).filter((p) => p.id !== id);
+  localStorage.setItem(PRESETS_KEY(userId), JSON.stringify(presets));
   return presets;
 }
 ```
 
-Presets are **per-browser**, not synced server-side, and persist across page refreshes but not across devices/browsers.
+Presets are stored in browser `localStorage`, scoped to the signed-in user and browser, not synced server-side, and persist across page refreshes but not across devices/browsers. Treat stored JSON as untrusted: validate every preset and filter field before use, discard malformed records, cap the serialized payload and number of presets, and surface storage access/quota failures to the user. Never render preset names as HTML.
 
 ---
 
