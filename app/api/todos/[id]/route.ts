@@ -3,7 +3,7 @@ import { checkApiRateLimit } from '@/lib/api-rate-limit';
 import { getSession } from '@/lib/auth';
 import { todoDB } from '@/lib/db';
 import { isReminderMinutes } from '@/lib/reminder-options';
-import { validateUpdateTodo } from '@/lib/todo-validation';
+import { normalizeDueDate, validateUpdateTodo } from '@/lib/todo-validation';
 import { rejectCrossOrigin, tagError } from '@/lib/tag-api';
 
 async function readJson(request: NextRequest): Promise<unknown> {
@@ -56,6 +56,23 @@ export async function PUT(
   const body = await readJson(request);
   const existing = todoDB.findByIdForUser(id, session.userId);
   if (!existing) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
+
+  if (body && typeof body === 'object' && !Array.isArray(body) && 'last_notification_sent' in body) {
+    const record = body as Record<string, unknown>;
+    const timestamp = normalizeDueDate(record.last_notification_sent);
+    if (
+      Object.keys(record).some((key) => key !== 'last_notification_sent' && key !== 'reminder_revision') ||
+      'error' in timestamp || timestamp.value === null ||
+      typeof record.reminder_revision !== 'number' ||
+      !Number.isSafeInteger(record.reminder_revision) || record.reminder_revision < 0
+    ) {
+      return NextResponse.json({ error: 'A reminder timestamp and revision are required' }, { status: 400 });
+    }
+    if (!todoDB.acknowledgeReminderForUser(id, session.userId, record.reminder_revision)) {
+      return NextResponse.json({ error: 'Reminder has changed or was already acknowledged' }, { status: 409 });
+    }
+    return NextResponse.json({ todo: todoDB.findByIdForUser(id, session.userId) });
+  }
 
   const parsed = validateUpdateTodo(body, existing);
   if ('error' in parsed) {

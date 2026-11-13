@@ -434,6 +434,11 @@ Use this checklist to verify the app is working correctly.
 5. Browser notification should appear
 ```
 
+Reminder acknowledgments include the revision returned by `/api/notifications/check`.
+`PUT /api/todos/[id]` requires both `last_notification_sent` and `reminder_revision`
+for this operation; stale revisions return `409` and do not mark the new reminder
+as sent. Refresh older open app tabs after upgrading.
+
 ### ✅ Calendar View
 ```
 1. Navigate to http://localhost:3000/calendar
