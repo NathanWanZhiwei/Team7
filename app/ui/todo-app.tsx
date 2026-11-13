@@ -2,16 +2,24 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import type { Priority, Todo, UpdateTodoInput } from '@/lib/db';
+import type { Priority, RecurrencePattern, Todo, UpdateTodoInput } from '@/lib/db';
 import { sectionTodos } from '@/lib/todo-sorting';
 import { LogoutButton } from './logout-button';
 
 type PriorityFilter = Priority | 'all';
+type TodoUpdateResponse = { todo: Todo; nextInstance?: Todo };
 
 const priorityLabels: Record<Priority, string> = {
   high: 'High',
   medium: 'Medium',
   low: 'Low',
+};
+
+const recurrenceLabels: Record<RecurrencePattern, string> = {
+  daily: 'Daily',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+  yearly: 'Yearly',
 };
 
 const dueDateFormatter = new Intl.DateTimeFormat('en-SG', {
@@ -65,6 +73,58 @@ function PriorityBadge({ priority }: { priority: Priority }) {
   );
 }
 
+function RecurrenceBadge({ pattern }: { pattern: RecurrencePattern }) {
+  return (
+    <span className="recurrence-badge">
+      <span aria-hidden="true">🔄</span> {recurrenceLabels[pattern].toLowerCase()}
+    </span>
+  );
+}
+
+function RecurrenceFields({
+  isRecurring,
+  pattern,
+  hasDueDate,
+  onToggle,
+  onPatternChange,
+}: {
+  isRecurring: boolean;
+  pattern: RecurrencePattern;
+  hasDueDate: boolean;
+  onToggle: (checked: boolean) => void;
+  onPatternChange: (pattern: RecurrencePattern) => void;
+}) {
+  return (
+    <div className="todo-recurrence-controls">
+      <label className="todo-repeat-toggle">
+        <input
+          type="checkbox"
+          checked={isRecurring}
+          onChange={(event) => onToggle(event.target.checked)}
+          disabled={!hasDueDate && !isRecurring}
+        />
+        Repeat
+      </label>
+      {isRecurring && (
+        <select
+          aria-label="Recurrence pattern"
+          value={pattern}
+          onChange={(event) => onPatternChange(event.target.value as RecurrencePattern)}
+        >
+          {(Object.keys(recurrenceLabels) as RecurrencePattern[]).map((value) => (
+            <option key={value} value={value}>
+              {recurrenceLabels[value]}
+            </option>
+          ))}
+        </select>
+      )}
+      {!hasDueDate && !isRecurring && (
+        <span className="todo-recurrence-hint">Set a due date to enable repeat</span>
+      )}
+    </div>
+  );
+}
+
 function TodoSection({
   title,
   todos,
@@ -107,6 +167,9 @@ function TodoSection({
                     {todo.title}
                   </span>
                   <PriorityBadge priority={todo.priority} />
+                  {todo.is_recurring && todo.recurrence_pattern && (
+                    <RecurrenceBadge pattern={todo.recurrence_pattern} />
+                  )}
                 </div>
                 {todo.due_date && (
                   <time className="todo-due" dateTime={todo.due_date}>
@@ -148,12 +211,18 @@ export function TodoApp({ userId, username }: { userId: number; username: string
   const [createTitle, setCreateTitle] = useState('');
   const [createDueDate, setCreateDueDate] = useState('');
   const [createPriority, setCreatePriority] = useState<Priority>('medium');
+  const [createRecurring, setCreateRecurring] = useState(false);
+  const [createRecurrencePattern, setCreateRecurrencePattern] =
+    useState<RecurrencePattern>('daily');
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [editingTodo, setEditingTodo] = useState<Todo | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDueDate, setEditDueDate] = useState('');
   const [editPriority, setEditPriority] = useState<Priority>('medium');
+  const [editRecurring, setEditRecurring] = useState(false);
+  const [editRecurrencePattern, setEditRecurrencePattern] =
+    useState<RecurrencePattern>('daily');
 
   useEffect(() => {
     let active = true;
@@ -204,6 +273,8 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       title: createTitle.trim(),
       due_date: dueDateFromInput(createDueDate),
       priority: createPriority,
+      is_recurring: createRecurring,
+      recurrence_pattern: createRecurring ? createRecurrencePattern : null,
     };
     const optimisticTodo: Todo = {
       id: temporaryId,
@@ -212,8 +283,8 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       completed: false,
       due_date: input.due_date,
       priority: input.priority,
-      is_recurring: false,
-      recurrence_pattern: null,
+      is_recurring: input.is_recurring,
+      recurrence_pattern: input.recurrence_pattern,
       reminder_minutes: null,
       last_notification_sent: null,
       created_at: new Date().toISOString(),
@@ -233,6 +304,8 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       setCreateTitle('');
       setCreateDueDate('');
       setCreatePriority('medium');
+      setCreateRecurring(false);
+      setCreateRecurrencePattern('daily');
     } catch (createError) {
       setTodos((current) => current.filter((todo) => todo.id !== temporaryId));
       setError(getErrorMessage(createError, 'Could not create todo. Please try again.'));
@@ -250,12 +323,21 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       current.map((todo) => (todo.id === id ? { ...todo, ...patch } : todo)),
     );
     try {
-      const updated = await requestJson<Todo>(`/api/todos/${id}`, {
+      const result = await requestJson<TodoUpdateResponse>(`/api/todos/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       });
-      setTodos((current) => current.map((todo) => (todo.id === id ? updated : todo)));
+      setTodos((current) => {
+        const updated = current.map((todo) => (todo.id === id ? result.todo : todo));
+        if (
+          result.nextInstance &&
+          !updated.some((todo) => todo.id === result.nextInstance?.id)
+        ) {
+          return [...updated, result.nextInstance];
+        }
+        return updated;
+      });
       return true;
     } catch (updateError) {
       setTodos((current) => current.map((todo) => (todo.id === id ? previous : todo)));
@@ -289,6 +371,8 @@ export function TodoApp({ userId, username }: { userId: number; username: string
     setEditTitle(todo.title);
     setEditDueDate(singaporeInputValue(todo.due_date));
     setEditPriority(todo.priority);
+    setEditRecurring(todo.is_recurring);
+    setEditRecurrencePattern(todo.recurrence_pattern ?? 'daily');
     setError(null);
   }
 
@@ -299,6 +383,8 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       title: editTitle.trim(),
       due_date: dueDateFromInput(editDueDate),
       priority: editPriority,
+      is_recurring: editRecurring,
+      recurrence_pattern: editRecurring ? editRecurrencePattern : null,
     });
     if (updated) setEditingTodo(null);
   }
@@ -352,6 +438,13 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 ))}
               </select>
             </label>
+            <RecurrenceFields
+              isRecurring={createRecurring}
+              pattern={createRecurrencePattern}
+              hasDueDate={Boolean(createDueDate)}
+              onToggle={setCreateRecurring}
+              onPatternChange={setCreateRecurrencePattern}
+            />
             <button type="submit" disabled={creating}>
               {creating ? 'Adding…' : 'Add todo'}
             </button>
@@ -460,6 +553,13 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                   ))}
                 </select>
               </label>
+              <RecurrenceFields
+                isRecurring={editRecurring}
+                pattern={editRecurrencePattern}
+                hasDueDate={Boolean(editDueDate)}
+                onToggle={setEditRecurring}
+                onPatternChange={setEditRecurrencePattern}
+              />
               <div className="todo-modal-actions">
                 <button
                   type="button"

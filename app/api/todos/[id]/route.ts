@@ -45,13 +45,16 @@ export async function PUT(
   if (id === null) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
 
   const body = await readJson(request);
-  const parsed = validateUpdateTodo(body);
+  const existing = todoDB.findByIdForUser(id, session.userId);
+  if (!existing) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
+
+  const parsed = validateUpdateTodo(body, existing);
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const todo = todoDB.updateForUser(id, session.userId, parsed.value);
-  if (!todo) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
-  return NextResponse.json(todo);
+  const result = todoDB.updateWithRecurrenceForUser(id, session.userId, parsed.value);
+  if (!result) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
+  return NextResponse.json(result);
 }
 
 export async function DELETE(
