@@ -2,7 +2,16 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import type { Priority, RecurrencePattern, Subtask, Tag, Todo, UpdateTodoInput } from '@/lib/db';
+import type {
+  ImportResult,
+  Priority,
+  RecurrencePattern,
+  Subtask,
+  Tag,
+  Template,
+  Todo,
+  UpdateTodoInput,
+} from '@/lib/db';
 import {
   isReminderMinutes,
   REMINDER_LABELS,
@@ -24,6 +33,7 @@ import {
 import { deletePreset, loadPresets, savePreset } from '@/lib/filter-presets';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { formatSingaporeDateTime, getSingaporeNow } from '@/lib/timezone';
+import { requestJson } from '@/lib/client-api';
 import { LogoutButton } from './logout-button';
 import { useNotifications } from '@/lib/hooks/useNotifications';
 
@@ -47,20 +57,6 @@ const dueDateFormatter = new Intl.DateTimeFormat('en-SG', {
   timeStyle: 'short',
   timeZone: 'Asia/Singapore',
 });
-
-async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  const payload: unknown = await response.json();
-  if (!response.ok) {
-    const message =
-      payload && typeof payload === 'object' && 'error' in payload &&
-      typeof payload.error === 'string'
-        ? payload.error
-        : `Request failed (${response.status})`;
-    throw new Error(message);
-  }
-  return payload as T;
-}
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -198,6 +194,15 @@ function singaporeInputValue(value: string | null): string {
 
 function dueDateFromInput(value: string): string | null {
   return value ? `${value}:00.000+08:00` : null;
+}
+
+function dueDateOffsetFromInput(value: string): number | null {
+  const dueDate = dueDateFromInput(value);
+  if (!dueDate) return null;
+  const timestamp = Date.parse(dueDate);
+  return Number.isFinite(timestamp)
+    ? Math.max(1, Math.ceil((timestamp - Date.now()) / 60_000))
+    : null;
 }
 
 function reminderFromInput(value: string): ReminderMinutes | null {
@@ -363,6 +368,250 @@ function ManageTags({ tags, onSave, onDelete, onClose }: {
           <button type="submit" disabled={busy}>{editingId === null ? 'Create Tag' : 'Update Tag'}</button>
         </div>
       </form>
+    </dialog>
+  );
+}
+
+interface TemplateDraft {
+  title: string;
+  priority: Priority;
+  is_recurring: boolean;
+  recurrence_pattern: RecurrencePattern | null;
+  reminder_minutes: number | null;
+  due_date_offset_minutes: number | null;
+}
+
+function SaveTemplateModal({ draft, onClose, onSaved }: {
+  draft: TemplateDraft;
+  onClose: () => void;
+  onSaved: (template: Template) => void;
+}) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState('');
+  const [offset, setOffset] = useState(
+    draft.due_date_offset_minutes === null ? '' : String(draft.due_date_offset_minutes),
+  );
+  const [subtasks, setSubtasks] = useState<string[]>([]);
+  const [newSubtask, setNewSubtask] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => element?.close();
+  }, []);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const template = await requestJson<Template>('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          description,
+          category,
+          title_template: draft.title,
+          priority: draft.priority,
+          is_recurring: draft.is_recurring,
+          recurrence_pattern: draft.is_recurring ? draft.recurrence_pattern : null,
+          reminder_minutes: draft.reminder_minutes,
+          due_date_offset_minutes: offset === '' ? null : Number(offset),
+          subtasks: subtasks.map((title, position) => ({ title, position })),
+        }),
+      });
+      onSaved(template);
+    } catch (saveError) {
+      setError(getErrorMessage(saveError, 'Could not save template.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function addSubtask() {
+    const title = newSubtask.trim();
+    if (!title) return;
+    setSubtasks((current) => [...current, title]);
+    setNewSubtask('');
+  }
+
+  return (
+    <dialog
+      ref={dialog}
+      className="todo-modal template-modal"
+      aria-labelledby="save-template-heading"
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!saving) onClose();
+      }}
+    >
+      <h2 id="save-template-heading">Save as Template</h2>
+      {error && <p className="todo-error" role="alert">{error}</p>}
+      <form className="todo-form todo-edit-form" onSubmit={(event) => void save(event)}>
+        <label className="todo-field">
+          Name
+          <input required autoFocus value={name} disabled={saving}
+            onChange={(event) => setName(event.target.value)} />
+        </label>
+        <label className="todo-field">
+          Description (optional)
+          <textarea value={description} disabled={saving}
+            onChange={(event) => setDescription(event.target.value)} />
+        </label>
+        <label className="todo-field">
+          Category (optional)
+          <input list="template-category-suggestions" value={category} disabled={saving}
+            onChange={(event) => setCategory(event.target.value)} />
+          <datalist id="template-category-suggestions">
+            {['Work', 'Personal', 'Finance', 'Health', 'Education'].map((value) =>
+              <option key={value} value={value} />,
+            )}
+          </datalist>
+        </label>
+        <label className="todo-field">
+          Due date offset from use (minutes, optional)
+          <input type="number" min="1" step="1" value={offset} disabled={saving}
+            onChange={(event) => setOffset(event.target.value)} />
+        </label>
+        {(draft.is_recurring || draft.reminder_minutes !== null) && offset === '' && (
+          <p className="muted">A due date offset is required for recurring todos and reminders.</p>
+        )}
+        <fieldset className="template-subtask-editor" disabled={saving}>
+          <legend>Checklist (optional)</legend>
+          <ul className="template-subtask-list">
+            {subtasks.map((title, index) => (
+              <li key={`${index}-${title}`}>
+                <span>{title}</span>
+                <button type="button" className="text-button text-button--danger"
+                  aria-label={`Remove checklist item ${title}`}
+                  onClick={() => setSubtasks((current) => current.filter((_, i) => i !== index))}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="template-subtask-add">
+            <label className="todo-field">
+              Checklist item
+              <input value={newSubtask} onChange={(event) => setNewSubtask(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    addSubtask();
+                  }
+                }} />
+            </label>
+            <button type="button" className="secondary" disabled={!newSubtask.trim()}
+              onClick={addSubtask}>
+              Add item
+            </button>
+          </div>
+        </fieldset>
+        <div className="todo-modal-actions">
+          <button type="button" className="secondary" disabled={saving} onClick={onClose}>Cancel</button>
+          <button type="submit" disabled={saving || !name.trim()}>
+            {saving ? 'Saving…' : 'Save Template'}
+          </button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
+function TemplateCard({ template, onUse, onDelete, busy }: {
+  template: Template;
+  onUse: (id: number) => void;
+  onDelete?: (template: Template) => void;
+  busy: boolean;
+}) {
+  return (
+    <article className="template-card">
+      <div className="template-card-title">
+        <strong>{template.name}</strong>
+        {template.category && <span className="badge badge-category">{template.category}</span>}
+      </div>
+      {template.description && <p className="template-description">{template.description}</p>}
+      <p className="template-title-preview">{template.title_template}</p>
+      <div className="template-badges">
+        <PriorityBadge priority={template.priority} />
+        {template.is_recurring && template.recurrence_pattern &&
+          <span className="recurrence-badge">🔄 {recurrenceLabels[template.recurrence_pattern].toLowerCase()}</span>}
+        {isReminderMinutes(template.reminder_minutes) &&
+          <span className="reminder-badge">🔔 {REMINDER_LABELS[template.reminder_minutes]}</span>}
+      </div>
+      <div className="template-actions">
+        <button type="button" disabled={busy} onClick={() => onUse(template.id)}>Use</button>
+        {onDelete && <button type="button" className="text-button text-button--danger"
+          disabled={busy} onClick={() => onDelete(template)}>Delete</button>}
+      </div>
+    </article>
+  );
+}
+
+function TemplateManager({ templates, busyId, onUse, onDelete, onClose }: {
+  templates: Template[];
+  busyId: number | null;
+  onUse: (id: number) => Promise<string | null>;
+  onDelete: (template: Template) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => element?.close();
+  }, []);
+
+  async function useTemplate(id: number) {
+    const message = await onUse(id);
+    if (message) setError(message);
+    else onClose();
+  }
+
+  async function deleteTemplate(template: Template) {
+    if (!window.confirm(`Delete template "${template.name}"?`)) return;
+    setError(null);
+    try {
+      await onDelete(template);
+    } catch (deleteError) {
+      setError(getErrorMessage(deleteError, 'Could not delete template.'));
+    }
+  }
+
+  return (
+    <dialog
+      ref={dialog}
+      className="todo-modal template-modal"
+      aria-labelledby="manage-templates-heading"
+      onCancel={(event) => {
+        event.preventDefault();
+        if (busyId === null) onClose();
+      }}
+    >
+      <h2 id="manage-templates-heading">Templates</h2>
+      {error && <p className="todo-error" role="alert">{error}</p>}
+      {templates.length === 0 ? (
+        <p className="todo-empty">No templates yet. Save a todo as a template to get started.</p>
+      ) : (
+        <div className="template-list">
+          {templates.map((template) => (
+            <TemplateCard key={template.id} template={template}
+              onUse={(id) => void useTemplate(id)}
+              onDelete={(item) => void deleteTemplate(item)}
+              busy={busyId !== null} />
+          ))}
+        </div>
+      )}
+      <div className="todo-modal-actions">
+        <button type="button" className="secondary" disabled={busyId !== null} onClick={onClose}>Close</button>
+      </div>
     </dialog>
   );
 }
@@ -707,6 +956,99 @@ function TodoSection({
   );
 }
 
+function ExportImportToolbar({ onImported }: { onImported: () => Promise<void> }) {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  async function download(format: 'json' | 'csv') {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/todos/export?format=${format}`);
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload.error ?? 'Failed to export todos');
+      }
+      const blob = await response.blob();
+      const filename = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1];
+      if (!filename) throw new Error('Export response did not include a filename');
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (downloadError) {
+      setMessage({ type: 'error', text: getErrorMessage(downloadError, 'Failed to export todos') });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importFile(file: File) {
+    setBusy(true);
+    setMessage(file.size > 10 * 1024 * 1024
+      ? { type: 'info', text: 'This file is over 10 MB; importing may take a while.' } : null);
+    try {
+      const text = await file.text();
+      JSON.parse(text);
+      const result = await requestJson<ImportResult>('/api/todos/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: text,
+      });
+      try {
+        await onImported();
+        setMessage({ type: 'success', text: `Successfully imported ${result.imported} todos` });
+      } catch (refreshError) {
+        setMessage({
+          type: 'error',
+          text: `Successfully imported ${result.imported} todos, but could not refresh the list. Reload the page; do not re-import. ${getErrorMessage(refreshError, '')}`,
+        });
+      }
+    } catch (importError) {
+      setMessage({
+        type: 'error',
+        text: importError instanceof SyntaxError
+          ? 'Invalid JSON format' : getErrorMessage(importError, 'Failed to import todos'),
+      });
+    } finally {
+      setBusy(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  }
+
+  return (
+    <section className="transfer-toolbar" aria-label="Export and import todos" aria-busy={busy}>
+      <div className="transfer-actions">
+        <button type="button" className="export-json" disabled={busy} onClick={() => void download('json')}>
+          Export JSON
+        </button>
+        <button type="button" className="export-csv" disabled={busy} onClick={() => void download('csv')}>
+          Export CSV
+        </button>
+        <button type="button" disabled={busy} onClick={() => fileInput.current?.click()}>
+          {busy ? 'Working...' : 'Import'}
+        </button>
+        <input ref={fileInput} type="file" accept="application/json,.json" hidden aria-label="Import JSON file"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void importFile(file);
+          }}
+        />
+      </div>
+      <p className="muted">Import creates new todos and does not merge with existing ones. CSV is export-only.</p>
+      {message && (
+        <p className={message.type === 'error' ? 'todo-error' : 'transfer-message'}
+          role={message.type === 'error' ? 'alert' : 'status'}>{message.text}</p>
+      )}
+    </section>
+  );
+}
+
 export function TodoApp({ userId, username }: { userId: number; username: string }) {
   const notifications = useNotifications();
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -720,6 +1062,11 @@ export function TodoApp({ userId, username }: { userId: number; username: string
   const [savingFilter, setSavingFilter] = useState(false);
   const [tags, setTags] = useState<Tag[]>([]);
   const [managingTags, setManagingTags] = useState(false);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [managingTemplates, setManagingTemplates] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [busyTemplateId, setBusyTemplateId] = useState<number | null>(null);
   const [createTagIds, setCreateTagIds] = useState<number[]>([]);
   const [editTagIds, setEditTagIds] = useState<number[]>([]);
   const [createTitle, setCreateTitle] = useState('');
@@ -746,10 +1093,16 @@ export function TodoApp({ userId, username }: { userId: number; username: string
     let active = true;
     async function loadTodos() {
       try {
-        const [loaded, loadedTags] = await Promise.all([
-          requestJson<Todo[]>('/api/todos'), requestJson<Tag[]>('/api/tags'),
+        const [loaded, loadedTags, loadedTemplates] = await Promise.all([
+          requestJson<Todo[]>('/api/todos'),
+          requestJson<Tag[]>('/api/tags'),
+          requestJson<Template[]>('/api/templates'),
         ]);
-        if (active) { setTodos(loaded); setTags(loadedTags); }
+        if (active) {
+          setTodos(loaded);
+          setTags(loadedTags);
+          setTemplates(loadedTemplates);
+        }
       } catch (loadError) {
         if (active) setError(getErrorMessage(loadError, 'Could not load todos.'));
       } finally {
@@ -877,6 +1230,15 @@ export function TodoApp({ userId, username }: { userId: number; username: string
     }
   }, [filterState.tagId, loading, tags]);
 
+  async function refreshAfterImport() {
+    const [loaded, loadedTags] = await Promise.all([
+      requestJson<Todo[]>('/api/todos'), requestJson<Tag[]>('/api/tags'),
+    ]);
+    setTodos(loaded);
+    setTags(loadedTags);
+    clearAllFilters();
+  }
+
   async function saveTag(id: number | null, name: string, color: string) {
     const saved = await requestJson<Tag>(id === null ? '/api/tags' : `/api/tags/${id}`, {
       method: id === null ? 'POST' : 'PUT',
@@ -901,6 +1263,37 @@ export function TodoApp({ userId, username }: { userId: number; username: string
     setFilterState((current) =>
       current.tagId === tag.id ? { ...current, tagId: 'all' } : current,
     );
+  }
+
+  async function useTemplate(id: number): Promise<string | null> {
+    setError(null);
+    setBusyTemplateId(id);
+    try {
+      const todo = await requestJson<Todo>(`/api/templates/${id}/use`, { method: 'POST' });
+      setTodos((current) => [...current, todo]);
+      setSelectedTemplateId('');
+      return null;
+    } catch (useError) {
+      const message = getErrorMessage(useError, 'Could not create todo from template.');
+      setError(message);
+      return message;
+    } finally {
+      setBusyTemplateId(null);
+    }
+  }
+
+  async function deleteTemplate(template: Template) {
+    await requestJson<{ success: boolean }>(`/api/templates/${template.id}`, {
+      method: 'DELETE',
+    });
+    setTemplates((current) => current.filter((item) => item.id !== template.id));
+  }
+
+  function saveTemplate(template: Template) {
+    setTemplates((current) => [...current, template].sort((a, b) =>
+      a.name.localeCompare(b.name) || a.id - b.id,
+    ));
+    setSavingTemplate(false);
   }
 
   async function createTodo(event: FormEvent<HTMLFormElement>) {
@@ -1067,6 +1460,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
             <p className="muted">Signed in as <strong>{username}</strong></p>
           </div>
           <div className="todo-header-actions">
+            <Link className="calendar-navigation-link" href="/calendar">Calendar</Link>
             <button
               type="button"
               className={
@@ -1084,10 +1478,15 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                   ? '🔔 Notifications On'
                   : '🔔 Enable Notifications'}
             </button>
+            <button type="button" className="secondary"
+                  onClick={() => setManagingTemplates(true)}>
+                  📋 Templates
+            </button>
             <Link href="/settings/passkeys">Manage passkeys</Link>
             <LogoutButton />
           </div>
         </header>
+        <ExportImportToolbar onImported={refreshAfterImport} />
         {notifications.error && (
           <p className="todo-error" role="alert">{notifications.error}</p>
         )}
@@ -1152,12 +1551,38 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 ))}
               </select>
             </label>
+            <label className="todo-field">
+              Use Template
+              <select aria-label="Use Template" value={selectedTemplateId}
+                disabled={templates.length === 0 || busyTemplateId !== null}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setSelectedTemplateId(value);
+                  if (value) void useTemplate(Number(value));
+                }}>
+                <option value="">{templates.length ? 'Choose a template' : 'No templates saved'}</option>
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.category
+                      ? `${template.name} (${template.category})`
+                      : template.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button type="submit" disabled={creating || loading}>
               {creating ? 'Adding…' : 'Add todo'}
             </button>
             <TagSelector tags={tags} selected={createTagIds}
               onChange={setCreateTagIds} disabled={creating} />
           </form>
+          {createTitle.trim() && (
+            <button type="button" className="secondary"
+              disabled={loading || creating || savingTemplate}
+              onClick={() => setSavingTemplate(true)}>
+              💾 Save as Template
+            </button>
+          )}
           <button type="button" className="secondary" disabled={loading || creating || busyId !== null}
             onClick={() => setManagingTags(true)}>+ Manage Tags</button>
         </section>
@@ -1348,6 +1773,30 @@ export function TodoApp({ userId, username }: { userId: number; username: string
           )}
         </section>
       </div>
+
+      {savingTemplate && (
+        <SaveTemplateModal
+          draft={{
+            title: createTitle.trim(),
+            priority: createPriority,
+            is_recurring: createRecurring,
+            recurrence_pattern: createRecurring ? createRecurrencePattern : null,
+            reminder_minutes: createReminderMinutes,
+            due_date_offset_minutes: dueDateOffsetFromInput(createDueDate),
+          }}
+          onClose={() => setSavingTemplate(false)}
+          onSaved={saveTemplate}
+        />
+      )}
+      {managingTemplates && (
+        <TemplateManager
+          templates={templates}
+          busyId={busyTemplateId}
+          onUse={useTemplate}
+          onDelete={deleteTemplate}
+          onClose={() => setManagingTemplates(false)}
+        />
+      )}
 
       {editingTodo && (
         <div

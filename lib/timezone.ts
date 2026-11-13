@@ -140,6 +140,24 @@ export function getSingaporeNow(): Date {
   return new Date();
 }
 
+export function formatSingaporeDate(value: string | Date): string {
+  const { year, month, day } = toSingaporeParts(value);
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+// UTC is only a carrier for Gregorian date-only arithmetic, not a local-time conversion.
+export function calendarDateUtc(year: number, month: number, day = 1): Date {
+  if (![year, month, day].every(Number.isInteger)) throw new RangeError('Invalid calendar date');
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  if (!Number.isFinite(date.getTime())) throw new RangeError('Calendar date is outside the supported date range');
+  return date;
+}
+
+export function formatCalendarDate(value: Date): string {
+  return value.toISOString().split('T')[0];
+}
+
 export function formatSingaporeDateTime(value: Date): string {
   const parts = Object.fromEntries(
     singaporeFormatter.formatToParts(value).map(({ type, value: part }) => [type, part]),

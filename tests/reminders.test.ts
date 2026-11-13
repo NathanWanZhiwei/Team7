@@ -121,6 +121,7 @@ test('due reminder query includes the exact trigger boundary in Singapore time',
       recurrence_pattern TEXT,
       reminder_minutes INTEGER,
       last_notification_sent TEXT,
+      reminder_revision INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT
     )
@@ -164,6 +165,7 @@ test('due reminder query handles all offsets across a Singapore date boundary', 
       recurrence_pattern TEXT,
       reminder_minutes INTEGER NOT NULL,
       last_notification_sent TEXT,
+      reminder_revision INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT
     )

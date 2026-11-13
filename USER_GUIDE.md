@@ -357,6 +357,8 @@ Save frequently used todo patterns as reusable templates for instant creation of
    - **Name**: Template identifier (required)
    - **Description**: Purpose/details (optional)
    - **Category**: Group similar templates (optional)
+   - **Due date offset**: Minutes from each use to the new todo's due date (optional)
+   - **Checklist**: Add the subtask titles to recreate on every use (optional)
 4. Click **"Save Template"**
 5. Template saved to your library
 
@@ -410,13 +412,14 @@ Templates preserve:
 - ✅ Recurrence settings (enabled/disabled)
 - ✅ Recurrence pattern (daily/weekly/monthly/yearly)
 - ✅ Reminder timing (minutes before due)
+- ✅ Subtask checklist (titles and order; recreated incomplete)
+- ✅ Optional relative due date offset
 - ✅ Category information
 - ✅ Description
 
 **Note**: Templates do NOT include:
-- ❌ Specific due dates (you set when creating)
-- ❌ Tags (selected when creating from template)
-- ❌ Subtasks (added after creation)
+- ❌ A concrete due date (the optional offset is recalculated from each use)
+- ❌ Tags (add tags to each created todo separately)
 
 ### Template Categories
 
@@ -751,15 +754,20 @@ Backup your todos, share them between devices, or analyze data in spreadsheets w
 **Fields Included**:
 ```json
 {
-  "id": 1,
-  "title": "Sample Todo",
-  "completed": false,
-  "due_date": "2025-11-10T14:00",
-  "priority": "high",
-  "is_recurring": true,
-  "recurrence_pattern": "weekly",
-  "reminder_minutes": 60,
-  "created_at": "2025-11-02T10:30:00"
+  "version": 1,
+  "exported_at": "2026-11-13T16:00:00.000+08:00",
+  "todos": [{
+    "title": "Sample Todo",
+    "completed": false,
+    "due_date": "2026-11-14T14:00:00.000+08:00",
+    "priority": "high",
+    "is_recurring": true,
+    "recurrence_pattern": "weekly",
+    "reminder_minutes": 60,
+    "created_at": "2026-11-02 10:30:00",
+    "subtasks": [{ "title": "First step", "completed": false, "position": 0 }],
+    "tags": [{ "name": "Work", "color": "#3B82F6" }]
+  }]
 }
 ```
 
@@ -810,12 +818,19 @@ ID,Title,Completed,Due Date,Priority,Recurring,Pattern,Reminder
 - Recurrence settings
 - Reminder timings
 - Creation timestamps
+- Subtasks, including completion and array order (positions are re-numbered)
+- Tag names, colors, and associations; same-named tags are reused case-insensitively
+  within your account, keeping the existing color
 
 **What's NOT Imported**:
-- ❌ Original todo IDs (new IDs assigned)
+- ❌ Original database IDs (new IDs assigned; existing matching tags are reused)
 - ❌ User associations (links to importing user)
-- ❌ Tags (must be recreated/reassigned)
-- ❌ Subtasks (if not in export format)
+- ❌ Previous notification delivery state
+
+Import appends new todos and never merges or replaces existing ones. Repeating an
+import creates duplicate todos, but not duplicate same-named tags. All records are
+validated before writing; database failures roll back the entire file. Files over
+10 MB show a warning and may take longer. CSV cannot be imported.
 
 #### Import Validation
 
@@ -939,16 +954,16 @@ Visualize your todos on a monthly calendar to see your schedule at a glance, spo
 
 #### Navigation
 - **To Calendar**: Click "Calendar" button
-- **Back to List**: Browser back button or navigate to home
-- **Always available**: Calendar button visible on both pages
+- **Back to List**: Click **List** in the calendar header
+- **Bookmarked month**: Use `/calendar?month=2026-03`; refreshing preserves the month
 
 ### Calendar Features
 
 #### Monthly View
 - Full month calendar grid
 - Current month displayed by default
-- Days organized in week rows
-- Week starts on Sunday (configurable)
+- Exactly six fixed week rows (42 dates), including dimmed adjacent-month dates
+- Week starts on Sunday
 
 #### Todo Display on Calendar
 - Todos appear on their due date
@@ -958,12 +973,17 @@ Visualize your todos on a monthly calendar to see your schedule at a glance, spo
   - 🔵 Low priority in blue
 - Todo titles shown on date cells
 - Multiple todos stack on same date
+- A count badge shows the total; up to three pills are visible, followed by "+X more"
+- Click a date for its full read-only todo list and holiday name
+- Undated todos stay in list view; completed todos are struck through
 
 #### Holiday Integration
-- Public holidays displayed (if configured)
+- Official Singapore public holidays for 2025-2027 are seeded automatically
 - Special styling for holidays
 - Holiday names shown
 - Helps with planning around holidays
+- In-lieu dates are conditional on Sunday being your rest day, as labeled
+- Other years remain navigable but have no preloaded holidays
 
 #### Visual Design
 - Clean, minimal interface
@@ -978,6 +998,7 @@ Visualize your todos on a monthly calendar to see your schedule at a glance, spo
 - Current month/year display
 - Next month button (▶)
 - Today button (jumps to current month)
+- Navigation replaces the URL; invalid month parameters fall back to the current Singapore month
 
 #### Date Selection
 - Click any date to view details
@@ -988,15 +1009,14 @@ Visualize your todos on a monthly calendar to see your schedule at a glance, spo
 ### Integration with Main App
 
 #### Data Synchronization
-- Calendar shows same todos as list view
-- Changes sync automatically
-- Real-time updates
+- Calendar reads the same persisted todos as list view
+- Switching to calendar or reloading it fetches the latest todos
+- Only actual recurring instances are shown, not projected future occurrences
 - No separate data storage
 
 #### Filtering
-- Calendar respects active filters (if applicable)
-- Shows only relevant todos
-- Updates when filters change
+- Calendar always shows all your due-dated todos
+- List-view search, tag, and priority filters do not apply
 
 ### Use Cases
 

@@ -4,6 +4,40 @@ This walkthrough will guide you from zero to running the Todo App with GitHub Co
 
 Reference : https://ai-sdlc-workshop-day1-production.up.railway.app/login
 
+## Implemented calendar view
+
+Select **Calendar** to open the protected `/calendar` month view. It shows all
+due-dated todos in Singapore time, regardless of list filters. Navigate with
+Previous/Today/Next; `?month=YYYY-MM` is bookmarkable and navigation replaces the
+URL. Every month has six fixed Sun-Sat rows. Priority colors match the list;
+completed items are struck through, and dates with more than three todos show
+an overflow indicator. Select a date for a keyboard-accessible, read-only summary.
+
+Singapore holidays for **2025-2027** are seeded automatically from the
+[Ministry of Manpower calendar](https://www.mom.gov.sg/employment-practices/public-holidays).
+Conditional in-lieu dates are labeled explicitly. Other years remain navigable,
+but their holidays are not populated. To seed a standalone database, run
+`npx tsx scripts/seed-holidays.ts`; it honors `TODO_DATABASE_PATH` and is idempotent.
+Update `lib/holidays.ts` only from verified official dates as new years are published.
+
+After building, run `npm run test:e2e -- 12-calendar` for calendar browser/API checks.
+
+## Implemented export and import
+
+Use **Export JSON** for a versioned backup of all your todos, including subtasks
+and tags, or **Export CSV** for a spreadsheet-friendly, export-only file. Downloads
+are named `todos-YYYY-MM-DD` using the Singapore date. CSV cells are escaped and
+formula-like text is prefixed with an apostrophe to prevent spreadsheet execution.
+
+**Import** accepts the app's version 1 JSON files. It appends new todos with new
+IDs, restores subtask order, and reuses tags case-insensitively within your account
+(existing colors win). Importing twice deliberately creates duplicate todos.
+Invalid files make no changes; database failures roll back the entire import.
+Past due dates and original todo creation timestamps are preserved; notification
+delivery state is reset. Files over 10 MB show a warning, not a hard size limit.
+
+After building, run `npm run test:e2e -- 11-export-import` for browser/API checks.
+
 ## Implemented tag system
 
 Use **+ Manage Tags** to create, rename, recolor, or delete your own tags. Deletion
@@ -433,6 +467,11 @@ Use this checklist to verify the app is working correctly.
 4. Wait 5 minutes
 5. Browser notification should appear
 ```
+
+Reminder acknowledgments include the revision returned by `/api/notifications/check`.
+`PUT /api/todos/[id]` requires both `last_notification_sent` and `reminder_revision`
+for this operation; stale revisions return `409` and do not mark the new reminder
+as sent. Refresh older open app tabs after upgrading.
 
 ### ✅ Calendar View
 ```

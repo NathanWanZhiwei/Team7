@@ -6,6 +6,7 @@ interface ReminderTodo {
   id: number;
   title: string;
   due_date: string;
+  reminder_revision: number;
 }
 
 const dueDateFormatter = new Intl.DateTimeFormat('en-SG', {
@@ -72,9 +73,12 @@ export function useNotifications() {
           const markResponse = await fetch(`/api/todos/${todo.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ last_notification_sent: new Date().toISOString() }),
+            body: JSON.stringify({
+              last_notification_sent: new Date().toISOString(),
+              reminder_revision: todo.reminder_revision,
+            }),
           });
-          if (!markResponse.ok) {
+          if (!markResponse.ok && markResponse.status !== 409) {
             throw new Error(`Could not record notification for todo ${todo.id}.`);
           }
         }

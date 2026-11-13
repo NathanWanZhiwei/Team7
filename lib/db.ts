@@ -2,6 +2,8 @@ import 'server-only';
 
 import Database from 'better-sqlite3';
 import { join } from 'node:path';
+import { generateCalendarGrid } from './calendar';
+import { HOLIDAYS_SCHEMA, seedHolidays } from './holidays';
 import { PRIORITY_ORDER, PRIORITY_VALUES } from './priority';
 import { calculateNextDueDate } from './recurrence';
 import { isReminderMinutes } from './reminder-options';
@@ -11,6 +13,7 @@ import {
   type ReminderMinutes,
 } from './reminder-options';
 import { DUE_REMINDERS_QUERY } from './reminder-query';
+import { parseTemplateSubtasks, serializeTemplateSubtasks, templateDueDate } from './template-utils';
 import { formatSingaporeDateTime, getSingaporeNow } from './timezone';
 import type { User } from './session-token';
 
@@ -47,6 +50,42 @@ export interface Tag {
   created_at: string;
 }
 
+export interface TemplateSubtask {
+  title: string;
+  position: number;
+}
+
+export interface Template {
+  id: number;
+  user_id: number;
+  name: string;
+  description: string | null;
+  category: string | null;
+  title_template: string;
+  priority: Priority;
+  is_recurring: boolean;
+  recurrence_pattern: RecurrencePattern | null;
+  reminder_minutes: number | null;
+  due_date_offset_minutes: number | null;
+  subtasks_json: string | null;
+  created_at: string;
+}
+
+export interface CreateTemplateDto {
+  name: string;
+  description?: string | null;
+  category?: string | null;
+  title_template: string;
+  priority?: Priority;
+  is_recurring?: boolean;
+  recurrence_pattern?: RecurrencePattern | null;
+  reminder_minutes?: ReminderMinutes | null;
+  due_date_offset_minutes?: number | null;
+  subtasks?: TemplateSubtask[];
+}
+
+export type UpdateTemplateDto = Partial<CreateTemplateDto>;
+
 export interface CreateTagInput {
   name: string;
   color?: string;
@@ -80,6 +119,24 @@ export interface Todo {
   subtasks?: Subtask[];
 }
 
+export interface DueReminder extends Todo {
+  reminder_revision: number;
+}
+
+export interface Holiday {
+  id: number;
+  date: string;
+  name: string;
+}
+
+export interface CalendarDay {
+  date: string;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  isPast: boolean;
+  isWeekend: boolean;
+}
+
 export interface Subtask {
   id: number;
   todo_id: number;
@@ -87,6 +144,24 @@ export interface Subtask {
   completed: boolean;
   position: number;
   created_at: string;
+}
+
+export interface TodoExportItem
+  extends Omit<Todo, 'id' | 'user_id' | 'updated_at' | 'last_notification_sent' | 'subtasks' | 'tags'> {
+  subtasks: Array<Pick<Subtask, 'title' | 'completed' | 'position'>>;
+  tags: Array<Pick<Tag, 'name' | 'color'>>;
+}
+
+export interface TodoExport {
+  version: 1;
+  exported_at: string;
+  todos: TodoExportItem[];
+}
+
+export interface ImportResult {
+  imported: number;
+  tagsCreated: number;
+  tagsReused: number;
 }
 
 export interface CreateSubtaskDto {
@@ -128,6 +203,8 @@ const databasePath = process.env.TODO_DATABASE_PATH ?? join(process.cwd(), 'todo
 const db = new Database(databasePath);
 db.pragma('foreign_keys = ON');
 db.pragma('journal_mode = WAL');
+db.exec(HOLIDAYS_SCHEMA);
+seedHolidays(db);
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,6 +248,7 @@ db.exec(`
       reminder_minutes IS NULL OR reminder_minutes IN (15, 30, 60, 120, 1440, 2880, 10080)
     ),
     last_notification_sent TEXT,
+    reminder_revision INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT
   );
@@ -203,6 +281,29 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_subtasks_todo_id ON subtasks(todo_id);
 
+  CREATE TABLE IF NOT EXISTS templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    category TEXT,
+    title_template TEXT NOT NULL,
+    priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('high', 'medium', 'low')),
+    is_recurring INTEGER NOT NULL DEFAULT 0 CHECK (is_recurring IN (0, 1)),
+    recurrence_pattern TEXT CHECK (
+      recurrence_pattern IS NULL OR recurrence_pattern IN ('daily', 'weekly', 'monthly', 'yearly')
+    ),
+    reminder_minutes INTEGER CHECK (
+      reminder_minutes IS NULL OR reminder_minutes IN (15, 30, 60, 120, 1440, 2880, 10080)
+    ),
+    due_date_offset_minutes INTEGER CHECK (
+      due_date_offset_minutes IS NULL OR due_date_offset_minutes >= 1
+    ),
+    subtasks_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_templates_user_id ON templates(user_id);
+
   CREATE TABLE IF NOT EXISTS api_rate_limits (
     subject_hash TEXT NOT NULL,
     scope TEXT NOT NULL CHECK (scope IN ('auth', 'read', 'write')),
@@ -213,6 +314,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_api_rate_limits_window_start
     ON api_rate_limits(window_start);
 `);
+
+db.transaction(() => {
+  const columns = db.pragma('table_info(todos)') as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'reminder_revision')) {
+    db.exec('ALTER TABLE todos ADD COLUMN reminder_revision INTEGER NOT NULL DEFAULT 0');
+  }
+}).immediate();
 
 const userByUsername = db.prepare(
   'SELECT id, username, created_at, webauthn_user_handle FROM users WHERE username = ?',
@@ -230,6 +338,12 @@ const todoSelect = `
   SELECT id, user_id, title, completed, due_date, priority, is_recurring,
     recurrence_pattern, reminder_minutes, last_notification_sent, created_at, updated_at
   FROM todos
+`;
+const templateSelect = `
+  SELECT id, user_id, name, description, category, title_template, priority,
+    is_recurring, recurrence_pattern, reminder_minutes, due_date_offset_minutes,
+    subtasks_json, created_at
+  FROM templates
 `;
 const subtaskSelect = `
   SELECT id, todo_id, title, completed, position, created_at
@@ -267,6 +381,15 @@ function mapTodo(row: TodoRow | undefined): Todo | undefined {
     is_recurring: row.is_recurring === 1,
     tags: tagDB.findByTodoId(row.id, row.user_id),
   };
+}
+
+interface TemplateRow extends Omit<Template, 'is_recurring'> {
+  is_recurring: number;
+}
+
+function mapTemplate(row: TemplateRow | undefined): Template | undefined {
+  if (!row) return undefined;
+  return { ...row, is_recurring: row.is_recurring === 1 };
 }
 
 interface SubtaskRow extends Omit<Subtask, 'completed'> {
@@ -390,7 +513,61 @@ export const userDB = {
   },
 };
 
+export const holidayDB = {
+  findAll(): Holiday[] {
+    return db.prepare('SELECT id, date, name FROM holidays ORDER BY date').all() as Holiday[];
+  },
+  findByMonth(year: number, month: number): Holiday[] {
+    const grid = generateCalendarGrid(year, month);
+    return db.prepare(
+      'SELECT id, date, name FROM holidays WHERE date >= ? AND date <= ? ORDER BY date',
+    ).all(grid[0].date, grid[41].date) as Holiday[];
+  },
+};
+
 export const todoDB = {
+  importAll(userId: number, items: TodoExportItem[]): ImportResult {
+    return db.transaction(() => {
+      const tagsByName = new Map(
+        tagDB.findAllByUser(userId).map((tag) => [tag.name.toLowerCase(), tag.id]),
+      );
+      const insertTodo = db.prepare(`
+        INSERT INTO todos (
+          user_id, title, completed, due_date, priority, is_recurring,
+          recurrence_pattern, reminder_minutes, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const insertSubtask = db.prepare(
+        'INSERT INTO subtasks (todo_id, title, completed, position) VALUES (?, ?, ?, ?)',
+      );
+      const insertTag = db.prepare('INSERT INTO tags (user_id, name, color) VALUES (?, ?, ?)');
+      const linkTag = db.prepare('INSERT OR IGNORE INTO todo_tags (todo_id, tag_id) VALUES (?, ?)');
+      let tagsCreated = 0;
+      let tagsReused = 0;
+      for (const item of items) {
+        const todoId = Number(insertTodo.run(
+          userId, item.title, item.completed ? 1 : 0, item.due_date, item.priority,
+          item.is_recurring ? 1 : 0, item.recurrence_pattern, item.reminder_minutes, item.created_at,
+        ).lastInsertRowid);
+        item.subtasks.forEach((subtask, position) => {
+          insertSubtask.run(todoId, subtask.title, subtask.completed ? 1 : 0, position);
+        });
+        for (const tag of item.tags) {
+          const name = tag.name.toLowerCase();
+          let tagId = tagsByName.get(name);
+          if (tagId === undefined) {
+            tagId = Number(insertTag.run(userId, tag.name, tag.color).lastInsertRowid);
+            tagsByName.set(name, tagId);
+            tagsCreated += 1;
+          } else {
+            tagsReused += 1;
+          }
+          linkTag.run(todoId, tagId);
+        }
+      }
+      return { imported: items.length, tagsCreated, tagsReused };
+    }).immediate();
+  },
   create(userId: number, input: CreateTodoInput): Todo {
     return db.transaction(() => {
       assertOwnedTags(input.tag_ids ?? [], userId);
@@ -424,11 +601,21 @@ export const todoDB = {
       .all(userId) as TodoRow[];
     return rows.map((row) => includeSubtasks(mapTodo(row))!);
   },
-  findDueRemindersForUser(userId: number, now = getSingaporeNow()): Todo[] {
+  findDueRemindersForUser(userId: number, now = getSingaporeNow()): DueReminder[] {
     const rows = db
       .prepare(DUE_REMINDERS_QUERY)
-      .all(userId, formatSingaporeDateTime(now)) as TodoRow[];
-    return rows.map((row) => mapTodo(row)!);
+      .all(userId, formatSingaporeDateTime(now)) as Array<TodoRow & { reminder_revision: number }>;
+    return rows.map((row) => ({ ...mapTodo(row)!, reminder_revision: row.reminder_revision }));
+  },
+  acknowledgeReminderForUser(id: number, userId: number, revision: number, now = getSingaporeNow()): boolean {
+    const sentAt = formatSingaporeDateTime(now);
+    return db.prepare(`
+      UPDATE todos SET last_notification_sent = ?
+      WHERE id = ? AND user_id = ? AND reminder_revision = ?
+        AND completed = 0 AND last_notification_sent IS NULL
+        AND reminder_minutes IS NOT NULL AND due_date IS NOT NULL
+        AND unixepoch(due_date, 'subsec') - reminder_minutes * 60 <= unixepoch(?, 'subsec')
+    `).run(sentAt, id, userId, revision, sentAt).changes > 0;
   },
   findByIdForUser(id: number, userId: number): Todo | undefined {
     return includeSubtasks(mapTodo(
@@ -466,6 +653,9 @@ export const todoDB = {
       const assignments = updates.map(([column]) => `${column} = ?`);
       if (hasReminderConfigurationChanged(current, input)) {
         assignments.push('last_notification_sent = NULL');
+        assignments.push('reminder_revision = reminder_revision + 1');
+      } else if (input.completed !== undefined && input.completed !== current.completed) {
+        assignments.push('reminder_revision = reminder_revision + 1');
       }
       assignments.push("updated_at = datetime('now')");
       const result = db
@@ -600,6 +790,114 @@ export const tagDB = {
       }
       db.prepare('DELETE FROM todo_tags WHERE todo_id = ? AND tag_id = ?').run(todoId, tagId);
     })();
+  },
+};
+
+export const templateDB = {
+  findAllByUser(userId: number): Template[] {
+    const rows = db.prepare(`${templateSelect} WHERE user_id = ? ORDER BY name COLLATE NOCASE, id`)
+      .all(userId) as TemplateRow[];
+    return rows.map((row) => mapTemplate(row)!);
+  },
+  findByIdForUser(id: number, userId: number): Template | undefined {
+    return mapTemplate(
+      db.prepare(`${templateSelect} WHERE id = ? AND user_id = ?`).get(id, userId) as
+        | TemplateRow
+        | undefined,
+    );
+  },
+  create(userId: number, input: CreateTemplateDto): Template {
+    const subtasksJson = serializeTemplateSubtasks(input.subtasks ?? []);
+    const result = db.prepare(`
+      INSERT INTO templates (
+        user_id, name, description, category, title_template, priority, is_recurring,
+        recurrence_pattern, reminder_minutes, due_date_offset_minutes, subtasks_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      userId,
+      input.name,
+      input.description ?? null,
+      input.category ?? null,
+      input.title_template,
+      input.priority ?? 'medium',
+      input.is_recurring ? 1 : 0,
+      input.is_recurring ? input.recurrence_pattern ?? null : null,
+      input.reminder_minutes ?? null,
+      input.due_date_offset_minutes ?? null,
+      subtasksJson,
+    );
+    const template = this.findByIdForUser(Number(result.lastInsertRowid), userId);
+    if (!template) throw new Error('Template creation did not return a template');
+    return template;
+  },
+  update(id: number, userId: number, input: UpdateTemplateDto): Template | undefined {
+    const current = this.findByIdForUser(id, userId);
+    if (!current) return undefined;
+    const updates: Array<[string, string | number | null]> = [];
+    if (input.name !== undefined) updates.push(['name', input.name]);
+    if (input.description !== undefined) updates.push(['description', input.description]);
+    if (input.category !== undefined) updates.push(['category', input.category]);
+    if (input.title_template !== undefined) updates.push(['title_template', input.title_template]);
+    if (input.priority !== undefined) updates.push(['priority', input.priority]);
+    if (input.is_recurring !== undefined) {
+      updates.push(['is_recurring', input.is_recurring ? 1 : 0]);
+    }
+    if (input.recurrence_pattern !== undefined) {
+      updates.push(['recurrence_pattern', input.recurrence_pattern]);
+    } else if (input.is_recurring === false) {
+      updates.push(['recurrence_pattern', null]);
+    }
+    if (input.reminder_minutes !== undefined) {
+      updates.push(['reminder_minutes', input.reminder_minutes]);
+    }
+    if (input.due_date_offset_minutes !== undefined) {
+      updates.push(['due_date_offset_minutes', input.due_date_offset_minutes]);
+    }
+    if (input.subtasks !== undefined) {
+      updates.push(['subtasks_json', serializeTemplateSubtasks(input.subtasks)]);
+    }
+    if (updates.length === 0) return current;
+    const assignments = updates.map(([column]) => `${column} = ?`);
+    const result = db.prepare(`
+      UPDATE templates SET ${assignments.join(', ')} WHERE id = ? AND user_id = ?
+    `).run(...updates.map(([, value]) => value), id, userId);
+    if (result.changes === 0) return undefined;
+    return this.findByIdForUser(id, userId);
+  },
+  deleteForUser(id: number, userId: number): boolean {
+    return db.prepare('DELETE FROM templates WHERE id = ? AND user_id = ?')
+      .run(id, userId).changes > 0;
+  },
+  createTodoForUser(id: number, userId: number, now = getSingaporeNow()): Todo | undefined {
+    return db.transaction(() => {
+      const template = this.findByIdForUser(id, userId);
+      if (!template) return undefined;
+      if (template.is_recurring && (
+        !template.recurrence_pattern || template.due_date_offset_minutes === null
+      )) {
+        throw new Error('Recurring template is missing its pattern or due date offset');
+      }
+      if (template.reminder_minutes !== null && !isReminderMinutes(template.reminder_minutes)) {
+        throw new Error('Template has an unsupported reminder offset');
+      }
+      if (template.reminder_minutes !== null && template.due_date_offset_minutes === null) {
+        throw new Error('Template reminder is missing its due date offset');
+      }
+      const todo = todoDB.create(userId, {
+        title: template.title_template,
+        priority: template.priority,
+        due_date: template.due_date_offset_minutes === null
+          ? null
+          : templateDueDate(template.due_date_offset_minutes, now),
+        is_recurring: template.is_recurring,
+        recurrence_pattern: template.recurrence_pattern,
+        reminder_minutes: template.reminder_minutes,
+      });
+      for (const subtask of parseTemplateSubtasks(template.subtasks_json)) {
+        subtaskDB.create(todo.id, { title: subtask.title });
+      }
+      return todoDB.findByIdForUser(todo.id, userId);
+    }).immediate();
   },
 };
 

@@ -1,0 +1,194 @@
+.calendar-page {
+  --calendar-line: #cbd5e1;
+  --calendar-base: #fff;
+  --calendar-weekend: #f0eefb;
+  --calendar-adjacent: #f1f5f9;
+  --calendar-today: #ede9fe;
+}
+
+.calendar-controls,
+.calendar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.calendar-controls {
+  justify-content: space-between;
+  margin: 20px 0 12px;
+}
+
+.calendar-controls h2 {
+  margin: 0;
+}
+
+.calendar-legend {
+  font-size: 0.8rem;
+}
+
+.calendar-grid {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.calendar-grid th {
+  padding: 12px 0;
+}
+
+.calendar-grid th:first-child,
+.calendar-grid th:last-child {
+  background: var(--calendar-weekend);
+}
+
+.calendar-grid td {
+  padding: 0;
+  vertical-align: top;
+  border: 1px solid var(--calendar-line);
+}
+
+.calendar-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  height: 170px;
+  min-width: 0;
+  padding: 7px;
+  border: 0;
+  background: var(--calendar-base);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.calendar-cell--weekend {
+  background: var(--calendar-weekend);
+}
+
+.calendar-cell--adjacent {
+  background: var(--calendar-adjacent);
+}
+
+.calendar-cell--adjacent .calendar-date,
+.calendar-cell--past .calendar-date {
+  opacity: 0.6;
+}
+
+.calendar-cell--today {
+  background: var(--calendar-today);
+  box-shadow: inset 0 0 0 3px #7c3aed;
+}
+
+.calendar-cell:focus-visible {
+  position: relative;
+  outline: 3px solid #7c3aed;
+  outline-offset: -3px;
+}
+
+.calendar-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+}
+
+.calendar-count {
+  padding: 1px 4px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.6rem;
+}
+
+.calendar-holiday,
+.calendar-todo {
+  display: block;
+  flex-shrink: 0;
+  width: 100%;
+  padding: 3px;
+  overflow: hidden;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-holiday {
+  background: #fce7f3;
+  color: #831843;
+  font-weight: 700;
+}
+
+.calendar-overflow {
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.calendar-completed {
+  text-decoration: line-through;
+}
+
+.calendar-day-modal {
+  width: min(94vw, 600px);
+}
+
+.calendar-day-modal::backdrop {
+  background: #0f172a99;
+}
+
+.calendar-day-todos {
+  display: grid;
+  gap: 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.calendar-day-todos li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--calendar-line);
+  overflow-wrap: anywhere;
+}
+
+.calendar-holiday-detail {
+  font-weight: 700;
+}
+
+@media (prefers-color-scheme: dark) {
+  .calendar-page {
+    --calendar-line: #3c4c62;
+    --calendar-base: #172235;
+    --calendar-weekend: #24233e;
+    --calendar-adjacent: #111b2c;
+    --calendar-today: #352453;
+  }
+
+  .calendar-holiday {
+    background: #641c44;
+    color: #fce7f3;
+  }
+}
+
+@media (max-width: 520px) {
+  .calendar-page {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .calendar-cell {
+    height: 150px;
+    padding: 4px;
+  }
+
+  .calendar-holiday,
+  .calendar-todo,
+  .calendar-overflow {
+    font-size: 0.65rem;
+  }
+}
