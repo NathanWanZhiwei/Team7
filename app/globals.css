@@ -408,6 +408,97 @@ button.secondary {
   padding-top: 2px;
 }
 
+.todo-subtasks {
+  grid-column: 2 / -1;
+  min-width: 0;
+  margin-top: 2px;
+}
+
+.subtask-toggle {
+  color: #53647b;
+}
+
+.subtask-progress {
+  max-width: 460px;
+  margin-top: 8px;
+}
+
+.subtask-progress-label {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  color: #5f6b7d;
+  font-size: 0.75rem;
+}
+
+.subtask-progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.subtask-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: #3b82f6;
+  transition: width 200ms ease;
+}
+
+.subtask-progress-fill--complete {
+  background: #22c55e;
+}
+
+.subtask-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 9px;
+  padding-left: 12px;
+}
+
+.subtask-item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.subtask-item input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  accent-color: #2459d3;
+}
+
+.subtask-title {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.subtask-title--completed {
+  color: #637083;
+  text-decoration: line-through;
+}
+
+.subtask-add {
+  display: flex;
+  gap: 8px;
+}
+
+.subtask-add input {
+  min-width: 0;
+  flex: 1;
+  padding: 7px 9px;
+  border: 1px solid #bdc7d7;
+  border-radius: 7px;
+}
+
+.subtask-add button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .text-button {
   padding: 0;
   border: 0;
@@ -533,8 +624,21 @@ button.secondary {
 
   .todo-title--completed,
   .todo-due,
-  .todo-empty {
+  .todo-empty,
+  .subtask-progress-label,
+  .subtask-toggle,
+  .subtask-title--completed {
     color: #b4bfd0;
+  }
+
+  .subtask-progress-track {
+    background: #303d51;
+  }
+
+  .subtask-add input {
+    border-color: #4a5870;
+    background: #101725;
+    color: #edf2fb;
   }
 
   .priority-badge--high {

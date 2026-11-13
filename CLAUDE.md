@@ -78,6 +78,8 @@ export async function GET/POST/PUT/DELETE(request: NextRequest) {
 }
 ```
 
+Apply `checkApiRateLimit` to every API handler before processing its request. Defaults are 10 unauthenticated/auth requests per IP per 10 minutes, 120 authenticated reads per user per minute, and 60 authenticated writes per user per minute; limited requests return `429` with `Retry-After`. Client IPs come from `x-real-ip` or `x-forwarded-for`, so production must use a trusted proxy that overwrites these headers. Counters live in the SQLite database: this policy is shared only by app instances using the same database, so local SQLite deployments must remain single-instance.
+
 ### 5. Feature-Rich Todo Model
 Todos support: priority (high/medium/low), recurring patterns (daily/weekly/monthly/yearly), reminders (15m/30m/1h/2h/1d/2d/1w before), subtasks with progress tracking, and tags.
 

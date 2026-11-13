@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { checkApiRateLimit } from '@/lib/api-rate-limit';
 import { getSession } from '@/lib/auth';
 import { todoDB } from '@/lib/db';
 import { validateUpdateTodo } from '@/lib/todo-validation';
@@ -19,10 +20,12 @@ async function getTodoId(params: Promise<{ id: string }>): Promise<number | null
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
+  const rateLimitResponse = checkApiRateLimit(request, 'read', session?.userId);
+  if (rateLimitResponse) return rateLimitResponse;
   if (!session) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
@@ -38,6 +41,8 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
+  const rateLimitResponse = checkApiRateLimit(request, 'write', session?.userId);
+  if (rateLimitResponse) return rateLimitResponse;
   if (!session) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
@@ -67,10 +72,12 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
+  const rateLimitResponse = checkApiRateLimit(request, 'write', session?.userId);
+  if (rateLimitResponse) return rateLimitResponse;
   if (!session) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import type { Priority, Todo, UpdateTodoInput } from '@/lib/db';
+import type { Priority, Subtask, Todo, UpdateTodoInput } from '@/lib/db';
 import {
   isReminderMinutes,
   REMINDER_LABELS,
@@ -10,6 +10,7 @@ import {
   type ReminderMinutes,
 } from '@/lib/reminder-options';
 import { sectionTodos } from '@/lib/todo-sorting';
+import { calculateProgress } from '@/lib/subtasks';
 import { LogoutButton } from './logout-button';
 import { useNotifications } from '@/lib/hooks/useNotifications';
 
@@ -82,6 +83,190 @@ function ReminderBadge({ minutes }: { minutes: number | null }) {
   return <span className="reminder-badge">🔔 {REMINDER_LABELS[minutes]}</span>;
 }
 
+function SubtaskList({
+  todoId,
+  subtasks,
+  onChange,
+  onError,
+}: {
+  todoId: number;
+  subtasks: Subtask[];
+  onChange: (update: (current: Subtask[]) => Subtask[]) => void;
+  onError: (message: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [busySubtaskId, setBusySubtaskId] = useState<number | null>(null);
+  const { completed, total, percent } = calculateProgress(subtasks);
+
+  async function addSubtask() {
+    const title = newTitle.trim();
+    if (!title || adding) return;
+
+    setAdding(true);
+    const optimistic: Subtask = {
+      id: -Date.now(),
+      todo_id: todoId,
+      title,
+      completed: false,
+      position: Math.max(-1, ...subtasks.map((subtask) => subtask.position)) + 1,
+      created_at: new Date().toISOString(),
+    };
+    onChange((current) => [...current, optimistic]);
+    try {
+      const saved = await requestJson<Subtask>(`/api/todos/${todoId}/subtasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      onChange((current) =>
+        current.map((subtask) => (subtask.id === optimistic.id ? saved : subtask)),
+      );
+      setNewTitle('');
+    } catch (error) {
+      onChange((current) => current.filter((subtask) => subtask.id !== optimistic.id));
+      onError(getErrorMessage(error, 'Could not add subtask.'));
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function toggleSubtask(subtask: Subtask) {
+    if (busySubtaskId !== null) return;
+    setBusySubtaskId(subtask.id);
+    onChange((current) =>
+      current.map((item) =>
+        item.id === subtask.id ? { ...item, completed: !subtask.completed } : item,
+      ),
+    );
+    try {
+      const updated = await requestJson<Subtask>(`/api/subtasks/${subtask.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed: !subtask.completed }),
+      });
+      onChange((current) =>
+        current.map((item) => (item.id === subtask.id ? updated : item)),
+      );
+    } catch (error) {
+      onChange((current) =>
+        current.map((item) =>
+          item.id === subtask.id ? { ...item, completed: subtask.completed } : item,
+        ),
+      );
+      onError(getErrorMessage(error, 'Could not update subtask.'));
+    } finally {
+      setBusySubtaskId(null);
+    }
+  }
+
+  async function deleteSubtask(subtask: Subtask) {
+    if (busySubtaskId !== null) return;
+    setBusySubtaskId(subtask.id);
+    onChange((current) => current.filter((item) => item.id !== subtask.id));
+    try {
+      await requestJson<{ success: boolean }>(`/api/subtasks/${subtask.id}`, {
+        method: 'DELETE',
+      });
+    } catch (error) {
+      onChange((current) =>
+        [...current, subtask].sort(
+          (left, right) => left.position - right.position || left.id - right.id,
+        ),
+      );
+      onError(getErrorMessage(error, 'Could not delete subtask.'));
+    } finally {
+      setBusySubtaskId(null);
+    }
+  }
+
+  return (
+    <div className="todo-subtasks">
+      <button
+        type="button"
+        className="text-button subtask-toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        {expanded ? '▼' : '▶'} Subtasks
+      </button>
+      {total > 0 && (
+        <div className="subtask-progress">
+          <div className="subtask-progress-label">
+            <span>{completed}/{total} subtasks</span>
+            <span>{percent}%</span>
+          </div>
+          <div
+            className="subtask-progress-track"
+            role="progressbar"
+            aria-label="Subtask progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent}
+          >
+            <div
+              className={`subtask-progress-fill${percent === 100 ? ' subtask-progress-fill--complete' : ''}`}
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        </div>
+      )}
+      {expanded && (
+        <div className="subtask-list">
+          {subtasks.map((subtask) => (
+            <div className="subtask-item" key={subtask.id}>
+              <input
+                type="checkbox"
+                checked={subtask.completed}
+                disabled={busySubtaskId !== null}
+                onChange={() => void toggleSubtask(subtask)}
+                aria-label={`Mark "${subtask.title}" as ${subtask.completed ? 'incomplete' : 'complete'}`}
+              />
+              <span className={subtask.completed ? 'subtask-title subtask-title--completed' : 'subtask-title'}>
+                {subtask.title}
+              </span>
+              <button
+                type="button"
+                className="text-button text-button--danger"
+                disabled={busySubtaskId !== null}
+                onClick={() => void deleteSubtask(subtask)}
+                aria-label={`Delete subtask "${subtask.title}"`}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <div className="subtask-add">
+            <input
+              type="text"
+              value={newTitle}
+              disabled={adding}
+              onChange={(event) => setNewTitle(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void addSubtask();
+                }
+              }}
+              placeholder="Add subtask..."
+              aria-label="New subtask title"
+            />
+            <button
+              type="button"
+              className="text-button"
+              disabled={adding || !newTitle.trim()}
+              onClick={() => void addSubtask()}
+            >
+              {adding ? 'Adding…' : 'Add'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TodoSection({
   title,
   todos,
@@ -89,6 +274,8 @@ function TodoSection({
   onToggle,
   onEdit,
   onDelete,
+  onSubtasksChange,
+  onError,
 }: {
   title: string;
   todos: Todo[];
@@ -96,6 +283,11 @@ function TodoSection({
   onToggle: (todo: Todo, completed: boolean) => void;
   onEdit: (todo: Todo) => void;
   onDelete: (todo: Todo) => void;
+  onSubtasksChange: (
+    todoId: number,
+    update: (current: Subtask[]) => Subtask[],
+  ) => void;
+  onError: (message: string) => void;
 }) {
   return (
     <section className="todo-section" aria-label={`${title} todos`}>
@@ -150,6 +342,12 @@ function TodoSection({
                   Delete
                 </button>
               </div>
+              <SubtaskList
+                todoId={todo.id}
+                subtasks={todo.subtasks ?? []}
+                onChange={(update) => onSubtasksChange(todo.id, update)}
+                onError={onError}
+              />
             </li>
           ))}
         </ul>
@@ -289,6 +487,19 @@ export function TodoApp({ userId, username }: { userId: number; username: string
     } finally {
       setBusyId(null);
     }
+  }
+
+  function updateTodoSubtasks(
+    todoId: number,
+    update: (current: Subtask[]) => Subtask[],
+  ) {
+    setTodos((current) =>
+      current.map((todo) =>
+        todo.id === todoId
+          ? { ...todo, subtasks: update(todo.subtasks ?? []) }
+          : todo,
+      ),
+    );
   }
 
   async function deleteTodo(todo: Todo) {
@@ -461,6 +672,8 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 onToggle={(todo, completed) => void updateTodo(todo.id, { completed })}
                 onEdit={startEditing}
                 onDelete={(todo) => void deleteTodo(todo)}
+                onSubtasksChange={updateTodoSubtasks}
+                onError={setError}
               />
               <TodoSection
                 title="Pending"
@@ -469,6 +682,8 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 onToggle={(todo, completed) => void updateTodo(todo.id, { completed })}
                 onEdit={startEditing}
                 onDelete={(todo) => void deleteTodo(todo)}
+                onSubtasksChange={updateTodoSubtasks}
+                onError={setError}
               />
               <TodoSection
                 title="Completed"
@@ -477,6 +692,8 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 onToggle={(todo, completed) => void updateTodo(todo.id, { completed })}
                 onEdit={startEditing}
                 onDelete={(todo) => void deleteTodo(todo)}
+                onSubtasksChange={updateTodoSubtasks}
+                onError={setError}
               />
             </div>
           )}

@@ -50,6 +50,25 @@ export interface Todo {
   last_notification_sent: string | null;
   created_at: string;
   updated_at: string | null;
+  subtasks?: Subtask[];
+}
+
+export interface Subtask {
+  id: number;
+  todo_id: number;
+  title: string;
+  completed: boolean;
+  position: number;
+  created_at: string;
+}
+
+export interface CreateSubtaskDto {
+  title: string;
+}
+
+export interface UpdateSubtaskDto {
+  title?: string;
+  completed?: boolean;
 }
 
 export interface CreateTodoInput {
@@ -124,6 +143,26 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_todos_user_id ON todos(user_id);
   CREATE INDEX IF NOT EXISTS idx_todos_due_date ON todos(due_date);
+
+  CREATE TABLE IF NOT EXISTS subtasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    todo_id INTEGER NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    completed INTEGER NOT NULL DEFAULT 0 CHECK (completed IN (0, 1)),
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_subtasks_todo_id ON subtasks(todo_id);
+
+  CREATE TABLE IF NOT EXISTS api_rate_limits (
+    subject_hash TEXT NOT NULL,
+    scope TEXT NOT NULL CHECK (scope IN ('auth', 'read', 'write')),
+    window_start INTEGER NOT NULL,
+    request_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (subject_hash, scope, window_start)
+  );
+  CREATE INDEX IF NOT EXISTS idx_api_rate_limits_window_start
+    ON api_rate_limits(window_start);
 `);
 
 const userByUsername = db.prepare(
@@ -143,6 +182,33 @@ const todoSelect = `
     recurrence_pattern, reminder_minutes, last_notification_sent, created_at, updated_at
   FROM todos
 `;
+const subtaskSelect = `
+  SELECT id, todo_id, title, completed, position, created_at
+  FROM subtasks
+`;
+const subtasksByTodo = db.prepare(
+  `${subtaskSelect} WHERE todo_id = ? ORDER BY position ASC, id ASC`,
+);
+const subtaskByIdForUser = db.prepare(`
+  SELECT s.id, s.todo_id, s.title, s.completed, s.position, s.created_at
+  FROM subtasks s
+  JOIN todos t ON t.id = s.todo_id
+  WHERE s.id = ? AND t.user_id = ?
+`);
+const incrementRateLimit = db.prepare(`
+  INSERT INTO api_rate_limits (subject_hash, scope, window_start, request_count)
+  VALUES (?, ?, ?, 1)
+  ON CONFLICT(subject_hash, scope, window_start) DO UPDATE SET
+    request_count = MIN(api_rate_limits.request_count + 1, 2147483647)
+`);
+const getRateLimitCount = db.prepare(`
+  SELECT request_count
+  FROM api_rate_limits
+  WHERE subject_hash = ? AND scope = ? AND window_start = ?
+`);
+const deleteExpiredRateLimits = db.prepare(
+  'DELETE FROM api_rate_limits WHERE window_start < ?',
+);
 
 function mapTodo(row: TodoRow | undefined): Todo | undefined {
   if (!row) return undefined;
@@ -152,6 +218,106 @@ function mapTodo(row: TodoRow | undefined): Todo | undefined {
     is_recurring: row.is_recurring === 1,
   };
 }
+
+interface SubtaskRow extends Omit<Subtask, 'completed'> {
+  completed: number;
+}
+
+function mapSubtask(row: SubtaskRow | undefined): Subtask | undefined {
+  if (!row) return undefined;
+  return { ...row, completed: row.completed === 1 };
+}
+
+function findSubtaskById(id: number): Subtask | undefined {
+  const row = db.prepare(`${subtaskSelect} WHERE id = ?`).get(id) as
+    | SubtaskRow
+    | undefined;
+  return mapSubtask(row);
+}
+
+export const subtaskDB = {
+  findByTodoId(todoId: number): Subtask[] {
+    return (subtasksByTodo.all(todoId) as SubtaskRow[]).map((row) => mapSubtask(row)!);
+  },
+  findByIdForUser(id: number, userId: number): Subtask | undefined {
+    return mapSubtask(subtaskByIdForUser.get(id, userId) as SubtaskRow | undefined);
+  },
+  create(todoId: number, data: CreateSubtaskDto): Subtask {
+    return db.transaction(() => {
+      const position = db
+        .prepare(
+          'SELECT COALESCE(MAX(position), -1) + 1 AS position FROM subtasks WHERE todo_id = ?',
+        )
+        .get(todoId) as { position: number };
+      const result = db
+        .prepare('INSERT INTO subtasks (todo_id, title, position) VALUES (?, ?, ?)')
+        .run(todoId, data.title, position.position);
+      const subtask = findSubtaskById(Number(result.lastInsertRowid));
+      if (!subtask) throw new Error('Subtask creation did not return a subtask');
+      return subtask;
+    })();
+  },
+  updateForUser(
+    id: number,
+    userId: number,
+    input: UpdateSubtaskDto,
+  ): Subtask | undefined {
+    const updates: Array<[string, string | number]> = [];
+    if (input.title !== undefined) updates.push(['title', input.title]);
+    if (input.completed !== undefined) updates.push(['completed', input.completed ? 1 : 0]);
+    if (updates.length === 0) return this.findByIdForUser(id, userId);
+
+    const assignments = updates.map(([column]) => `${column} = ?`);
+    const result = db
+      .prepare(`
+        UPDATE subtasks
+        SET ${assignments.join(', ')}
+        WHERE id = ?
+          AND EXISTS (
+            SELECT 1 FROM todos WHERE todos.id = subtasks.todo_id AND todos.user_id = ?
+          )
+      `)
+      .run(...updates.map(([, value]) => value), id, userId);
+    if (result.changes === 0) return undefined;
+    return this.findByIdForUser(id, userId);
+  },
+  deleteForUser(id: number, userId: number): boolean {
+    return (
+      db
+        .prepare(`
+          DELETE FROM subtasks
+          WHERE id = ?
+            AND EXISTS (
+              SELECT 1 FROM todos WHERE todos.id = subtasks.todo_id AND todos.user_id = ?
+            )
+        `)
+        .run(id, userId).changes > 0
+    );
+  },
+};
+
+function includeSubtasks(todo: Todo | undefined): Todo | undefined {
+  return todo ? { ...todo, subtasks: subtaskDB.findByTodoId(todo.id) } : undefined;
+}
+
+let rateLimitRequests = 0;
+
+export const apiRateLimitDB = {
+  consume(subjectHash: string, scope: 'auth' | 'read' | 'write', windowStart: number, now: number): number {
+    return db.transaction(() => {
+      rateLimitRequests += 1;
+      if (rateLimitRequests % 256 === 0) {
+        deleteExpiredRateLimits.run(now - 24 * 60 * 60 * 1000);
+      }
+      incrementRateLimit.run(subjectHash, scope, windowStart);
+      const row = getRateLimitCount.get(subjectHash, scope, windowStart) as
+        | { request_count: number }
+        | undefined;
+      if (!row) throw new Error('Rate limit update did not return a counter');
+      return row.request_count;
+    })();
+  },
+};
 
 export interface AuthUser extends User {
   webauthn_user_handle: Buffer;
@@ -206,7 +372,7 @@ export const todoDB = {
         `${todoSelect} WHERE user_id = ? ORDER BY due_date IS NULL, due_date, created_at DESC, id DESC`,
       )
       .all(userId) as TodoRow[];
-    return rows.map((row) => mapTodo(row)!);
+    return rows.map((row) => includeSubtasks(mapTodo(row))!);
   },
   findDueRemindersForUser(userId: number, now = getSingaporeNow()): Todo[] {
     const rows = db
@@ -215,11 +381,11 @@ export const todoDB = {
     return rows.map((row) => mapTodo(row)!);
   },
   findByIdForUser(id: number, userId: number): Todo | undefined {
-    return mapTodo(
+    return includeSubtasks(mapTodo(
       db.prepare(`${todoSelect} WHERE id = ? AND user_id = ?`).get(id, userId) as
         | TodoRow
         | undefined,
-    );
+    ));
   },
   updateForUser(id: number, userId: number, input: UpdateTodoInput): Todo | undefined {
     const current = this.findByIdForUser(id, userId);
