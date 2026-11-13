@@ -2,7 +2,7 @@
 
 ## Current Repository State
 
-This repository contains the planning and reference documentation for the Todo App plus its initial Next.js implementation: passwordless WebAuthn authentication, JWT sessions, SQLite user/authenticator storage, login and passkey-management pages, route protection, user-scoped Todo CRUD APIs, a priority-aware todo list with sorting, badges, and filtering, and recurring todos with Singapore-local date calculations and atomic next-instance creation. The remaining product features are still specified in `PRPs/*.md` and have not yet been implemented.
+This repository contains the planning and reference documentation for the Todo App plus its Next.js implementation: passwordless WebAuthn authentication, JWT sessions, SQLite user/authenticator storage, login and passkey-management pages, route protection, user-scoped Todo CRUD APIs, a priority-aware todo list with sorting, badges, and filtering, recurring todos with Singapore-local date calculations and atomic next-instance creation, and browser reminders. The remaining product features are still specified in `PRPs/*.md` and have not yet been implemented.
 
 The architecture below describes the conventions the app must follow as it grows. Before implementing a feature, inspect the existing source and extend it rather than scaffolding a duplicate project.
 

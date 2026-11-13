@@ -10,7 +10,6 @@ export interface SingaporeDateTimeParts extends SingaporeDateParts {
   second: number;
   millisecond: number;
 }
-
 const singaporeFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Singapore',
   year: 'numeric',
@@ -59,8 +58,11 @@ export function toSingaporeParts(value: string | Date): SingaporeDateTimeParts {
         calendarDate.getUTCFullYear() !== year ||
         calendarDate.getUTCMonth() !== month - 1 ||
         calendarDate.getUTCDate() !== day ||
+        hour < 0 ||
         hour > 23 ||
+        minute < 0 ||
         minute > 59 ||
+        second < 0 ||
         second > 59
       ) {
         throw new RangeError('Invalid Singapore-local date-time');
@@ -132,4 +134,16 @@ export function fromSingaporeParts(
   const dateText = `${pad(date.year, 4)}-${pad(date.month)}-${pad(date.day)}`;
   const timeText = `${pad(hour)}:${pad(minute)}:${pad(second)}.${pad(millisecond, 3)}`;
   return `${dateText}T${timeText}+08:00`;
+}
+
+export function getSingaporeNow(): Date {
+  return new Date();
+}
+
+export function formatSingaporeDateTime(value: Date): string {
+  const parts = Object.fromEntries(
+    singaporeFormatter.formatToParts(value).map(({ type, value: part }) => [type, part]),
+  );
+  const milliseconds = String(value.getUTCMilliseconds()).padStart(3, '0');
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.${milliseconds}+08:00`;
 }

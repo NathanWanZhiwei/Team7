@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { todoDB } from '@/lib/db';
+import { isReminderMinutes } from '@/lib/reminder-options';
 import { validateUpdateTodo } from '@/lib/todo-validation';
 
 async function readJson(request: NextRequest): Promise<unknown> {
@@ -51,6 +52,35 @@ export async function PUT(
   const parsed = validateUpdateTodo(body, existing);
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
+  if (
+    parsed.value.completed === true &&
+    !existing.completed &&
+    existing.is_recurring
+  ) {
+    const reminderMinutes =
+      parsed.value.reminder_minutes !== undefined
+        ? parsed.value.reminder_minutes
+        : existing.reminder_minutes;
+    if (reminderMinutes !== null && !isReminderMinutes(reminderMinutes)) {
+      return NextResponse.json(
+        {
+          error:
+            'Choose a supported reminder offset before completing this recurring todo.',
+        },
+        { status: 409 },
+      );
+    }
+  }
+  if (parsed.value.reminder_minutes != null) {
+    const dueDate =
+      parsed.value.due_date !== undefined ? parsed.value.due_date : existing.due_date;
+    if (!dueDate) {
+      return NextResponse.json(
+        { error: 'A due date is required to set a reminder' },
+        { status: 400 },
+      );
+    }
   }
   const result = todoDB.updateWithRecurrenceForUser(id, session.userId, parsed.value);
   if (!result) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });

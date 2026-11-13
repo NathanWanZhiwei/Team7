@@ -3,8 +3,15 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { Priority, RecurrencePattern, Todo, UpdateTodoInput } from '@/lib/db';
+import {
+  isReminderMinutes,
+  REMINDER_LABELS,
+  REMINDER_OPTIONS,
+  type ReminderMinutes,
+} from '@/lib/reminder-options';
 import { sectionTodos } from '@/lib/todo-sorting';
 import { LogoutButton } from './logout-button';
+import { useNotifications } from '@/lib/hooks/useNotifications';
 
 type PriorityFilter = Priority | 'all';
 type TodoUpdateResponse = { todo: Todo; nextInstance?: Todo };
@@ -63,6 +70,11 @@ function singaporeInputValue(value: string | null): string {
 
 function dueDateFromInput(value: string): string | null {
   return value ? `${value}:00.000+08:00` : null;
+}
+
+function reminderFromInput(value: string): ReminderMinutes | null {
+  const minutes = Number(value);
+  return value && isReminderMinutes(minutes) ? minutes : null;
 }
 
 function PriorityBadge({ priority }: { priority: Priority }) {
@@ -125,6 +137,11 @@ function RecurrenceFields({
   );
 }
 
+function ReminderBadge({ minutes }: { minutes: number | null }) {
+  if (!isReminderMinutes(minutes)) return null;
+  return <span className="reminder-badge">🔔 {REMINDER_LABELS[minutes]}</span>;
+}
+
 function TodoSection({
   title,
   todos,
@@ -170,6 +187,7 @@ function TodoSection({
                   {todo.is_recurring && todo.recurrence_pattern && (
                     <RecurrenceBadge pattern={todo.recurrence_pattern} />
                   )}
+                  <ReminderBadge minutes={todo.reminder_minutes} />
                 </div>
                 {todo.due_date && (
                   <time className="todo-due" dateTime={todo.due_date}>
@@ -204,6 +222,7 @@ function TodoSection({
 }
 
 export function TodoApp({ userId, username }: { userId: number; username: string }) {
+  const notifications = useNotifications();
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -214,6 +233,8 @@ export function TodoApp({ userId, username }: { userId: number; username: string
   const [createRecurring, setCreateRecurring] = useState(false);
   const [createRecurrencePattern, setCreateRecurrencePattern] =
     useState<RecurrencePattern>('daily');
+  const [createReminderMinutes, setCreateReminderMinutes] =
+    useState<ReminderMinutes | null>(null);
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [editingTodo, setEditingTodo] = useState<Todo | null>(null);
@@ -223,6 +244,8 @@ export function TodoApp({ userId, username }: { userId: number; username: string
   const [editRecurring, setEditRecurring] = useState(false);
   const [editRecurrencePattern, setEditRecurrencePattern] =
     useState<RecurrencePattern>('daily');
+  const [editReminderMinutes, setEditReminderMinutes] =
+    useState<ReminderMinutes | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -275,6 +298,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       priority: createPriority,
       is_recurring: createRecurring,
       recurrence_pattern: createRecurring ? createRecurrencePattern : null,
+      reminder_minutes: createReminderMinutes,
     };
     const optimisticTodo: Todo = {
       id: temporaryId,
@@ -285,7 +309,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       priority: input.priority,
       is_recurring: input.is_recurring,
       recurrence_pattern: input.recurrence_pattern,
-      reminder_minutes: null,
+      reminder_minutes: input.reminder_minutes,
       last_notification_sent: null,
       created_at: new Date().toISOString(),
       updated_at: null,
@@ -306,6 +330,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       setCreatePriority('medium');
       setCreateRecurring(false);
       setCreateRecurrencePattern('daily');
+      setCreateReminderMinutes(null);
     } catch (createError) {
       setTodos((current) => current.filter((todo) => todo.id !== temporaryId));
       setError(getErrorMessage(createError, 'Could not create todo. Please try again.'));
@@ -373,6 +398,9 @@ export function TodoApp({ userId, username }: { userId: number; username: string
     setEditPriority(todo.priority);
     setEditRecurring(todo.is_recurring);
     setEditRecurrencePattern(todo.recurrence_pattern ?? 'daily');
+    setEditReminderMinutes(
+      isReminderMinutes(todo.reminder_minutes) ? todo.reminder_minutes : null,
+    );
     setError(null);
   }
 
@@ -385,6 +413,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       priority: editPriority,
       is_recurring: editRecurring,
       recurrence_pattern: editRecurring ? editRecurrencePattern : null,
+      reminder_minutes: editReminderMinutes,
     });
     if (updated) setEditingTodo(null);
   }
@@ -399,10 +428,30 @@ export function TodoApp({ userId, username }: { userId: number; username: string
             <p className="muted">Signed in as <strong>{username}</strong></p>
           </div>
           <div className="todo-header-actions">
+            <button
+              type="button"
+              className={
+                notifications.permission === 'granted'
+                  ? 'notification-button notification-button--enabled'
+                  : 'notification-button'
+              }
+              disabled={!notifications.supported || notifications.permission === 'granted'}
+              aria-pressed={notifications.permission === 'granted'}
+              onClick={() => void notifications.requestPermission()}
+            >
+              {!notifications.supported
+                ? 'Notifications unavailable'
+                : notifications.permission === 'granted'
+                  ? '🔔 Notifications On'
+                  : '🔔 Enable Notifications'}
+            </button>
             <Link href="/settings/passkeys">Manage passkeys</Link>
             <LogoutButton />
           </div>
         </header>
+        {notifications.error && (
+          <p className="todo-error" role="alert">{notifications.error}</p>
+        )}
 
         <section className="todo-card todo-create-card" aria-labelledby="create-todo-heading">
           <h2 id="create-todo-heading">Add a todo</h2>
@@ -422,7 +471,10 @@ export function TodoApp({ userId, username }: { userId: number; username: string
               <input
                 type="datetime-local"
                 value={createDueDate}
-                onChange={(event) => setCreateDueDate(event.target.value)}
+                onChange={(event) => {
+                  setCreateDueDate(event.target.value);
+                  if (!event.target.value) setCreateReminderMinutes(null);
+                }}
               />
             </label>
             <label className="todo-field">
@@ -445,6 +497,22 @@ export function TodoApp({ userId, username }: { userId: number; username: string
               onToggle={setCreateRecurring}
               onPatternChange={setCreateRecurrencePattern}
             />
+            <label className="todo-field">
+              Reminder
+              <select
+                aria-label="Reminder"
+                value={createReminderMinutes ?? ''}
+                disabled={!createDueDate}
+                onChange={(event) =>
+                  setCreateReminderMinutes(reminderFromInput(event.target.value))
+                }
+              >
+                <option value="">None</option>
+                {REMINDER_OPTIONS.map(({ minutes, label }) => (
+                  <option key={minutes} value={minutes}>{label}</option>
+                ))}
+              </select>
+            </label>
             <button type="submit" disabled={creating}>
               {creating ? 'Adding…' : 'Add todo'}
             </button>
@@ -537,7 +605,10 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 <input
                   type="datetime-local"
                   value={editDueDate}
-                  onChange={(event) => setEditDueDate(event.target.value)}
+                  onChange={(event) => {
+                    setEditDueDate(event.target.value);
+                    if (!event.target.value) setEditReminderMinutes(null);
+                  }}
                 />
               </label>
               <label className="todo-field">
@@ -560,6 +631,22 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 onToggle={setEditRecurring}
                 onPatternChange={setEditRecurrencePattern}
               />
+              <label className="todo-field">
+                Reminder
+                <select
+                  aria-label="Edit reminder"
+                  value={editReminderMinutes ?? ''}
+                  disabled={!editDueDate}
+                  onChange={(event) =>
+                    setEditReminderMinutes(reminderFromInput(event.target.value))
+                  }
+                >
+                  <option value="">None</option>
+                  {REMINDER_OPTIONS.map(({ minutes, label }) => (
+                    <option key={minutes} value={minutes}>{label}</option>
+                  ))}
+                </select>
+              </label>
               <div className="todo-modal-actions">
                 <button
                   type="button"
