@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import type { Priority, RecurrencePattern, Subtask, Tag, Todo, UpdateTodoInput } from '@/lib/db';
+import type { ImportResult, Priority, RecurrencePattern, Subtask, Tag, Todo, UpdateTodoInput } from '@/lib/db';
 import {
   isReminderMinutes,
   REMINDER_LABELS,
@@ -581,6 +581,99 @@ function TodoSection({
   );
 }
 
+function ExportImportToolbar({ onImported }: { onImported: () => Promise<void> }) {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  async function download(format: 'json' | 'csv') {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/todos/export?format=${format}`);
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload.error ?? 'Failed to export todos');
+      }
+      const blob = await response.blob();
+      const filename = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1];
+      if (!filename) throw new Error('Export response did not include a filename');
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (downloadError) {
+      setMessage({ type: 'error', text: getErrorMessage(downloadError, 'Failed to export todos') });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importFile(file: File) {
+    setBusy(true);
+    setMessage(file.size > 10 * 1024 * 1024
+      ? { type: 'info', text: 'This file is over 10 MB; importing may take a while.' } : null);
+    try {
+      const text = await file.text();
+      JSON.parse(text);
+      const result = await requestJson<ImportResult>('/api/todos/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: text,
+      });
+      try {
+        await onImported();
+        setMessage({ type: 'success', text: `Successfully imported ${result.imported} todos` });
+      } catch (refreshError) {
+        setMessage({
+          type: 'error',
+          text: `Successfully imported ${result.imported} todos, but could not refresh the list. Reload the page; do not re-import. ${getErrorMessage(refreshError, '')}`,
+        });
+      }
+    } catch (importError) {
+      setMessage({
+        type: 'error',
+        text: importError instanceof SyntaxError
+          ? 'Invalid JSON format' : getErrorMessage(importError, 'Failed to import todos'),
+      });
+    } finally {
+      setBusy(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  }
+
+  return (
+    <section className="transfer-toolbar" aria-label="Export and import todos" aria-busy={busy}>
+      <div className="transfer-actions">
+        <button type="button" className="export-json" disabled={busy} onClick={() => void download('json')}>
+          Export JSON
+        </button>
+        <button type="button" className="export-csv" disabled={busy} onClick={() => void download('csv')}>
+          Export CSV
+        </button>
+        <button type="button" disabled={busy} onClick={() => fileInput.current?.click()}>
+          {busy ? 'Working...' : 'Import'}
+        </button>
+        <input ref={fileInput} type="file" accept="application/json,.json" hidden aria-label="Import JSON file"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void importFile(file);
+          }}
+        />
+      </div>
+      <p className="muted">Import creates new todos and does not merge with existing ones. CSV is export-only.</p>
+      {message && (
+        <p className={message.type === 'error' ? 'todo-error' : 'transfer-message'}
+          role={message.type === 'error' ? 'alert' : 'status'}>{message.text}</p>
+      )}
+    </section>
+  );
+}
+
 export function TodoApp({ userId, username }: { userId: number; username: string }) {
   const notifications = useNotifications();
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -648,6 +741,16 @@ export function TodoApp({ userId, username }: { userId: number; username: string
     );
     return sectionTodos(visibleTodos);
   }, [todos, priorityFilter, tagFilter]);
+
+  async function refreshAfterImport() {
+    const [loaded, loadedTags] = await Promise.all([
+      requestJson<Todo[]>('/api/todos'), requestJson<Tag[]>('/api/tags'),
+    ]);
+    setTodos(loaded);
+    setTags(loadedTags);
+    setPriorityFilter('all');
+    setTagFilter(null);
+  }
 
   async function saveTag(id: number | null, name: string, color: string) {
     const saved = await requestJson<Tag>(id === null ? '/api/tags' : `/api/tags/${id}`, {
@@ -858,6 +961,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
             <LogoutButton />
           </div>
         </header>
+        <ExportImportToolbar onImported={refreshAfterImport} />
         {notifications.error && (
           <p className="todo-error" role="alert">{notifications.error}</p>
         )}

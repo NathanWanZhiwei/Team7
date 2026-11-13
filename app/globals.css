@@ -176,6 +176,45 @@ button.secondary {
   white-space: nowrap;
 }
 
+.transfer-toolbar {
+  margin-bottom: 24px;
+}
+
+.transfer-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.transfer-actions button {
+  min-height: 42px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: #2459d3;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.transfer-actions .export-json {
+  background: #15803d;
+}
+
+.transfer-actions .export-csv {
+  background: #166534;
+}
+
+.transfer-actions button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.transfer-message {
+  font-weight: 600;
+}
+
 .notification-button {
   min-height: 38px;
   padding: 0 12px;

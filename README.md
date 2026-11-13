@@ -4,6 +4,22 @@ This walkthrough will guide you from zero to running the Todo App with GitHub Co
 
 Reference : https://ai-sdlc-workshop-day1-production.up.railway.app/login
 
+## Implemented export and import
+
+Use **Export JSON** for a versioned backup of all your todos, including subtasks
+and tags, or **Export CSV** for a spreadsheet-friendly, export-only file. Downloads
+are named `todos-YYYY-MM-DD` using the Singapore date. CSV cells are escaped and
+formula-like text is prefixed with an apostrophe to prevent spreadsheet execution.
+
+**Import** accepts the app's version 1 JSON files. It appends new todos with new
+IDs, restores subtask order, and reuses tags case-insensitively within your account
+(existing colors win). Importing twice deliberately creates duplicate todos.
+Invalid files make no changes; database failures roll back the entire import.
+Past due dates and original todo creation timestamps are preserved; notification
+delivery state is reset. Files over 10 MB show a warning, not a hard size limit.
+
+After building, run `npm run test:e2e -- 11-export-import` for browser/API checks.
+
 ## Implemented tag system
 
 Use **+ Manage Tags** to create, rename, recolor, or delete your own tags. Deletion
