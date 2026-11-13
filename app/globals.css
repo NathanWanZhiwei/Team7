@@ -605,8 +605,130 @@ button.secondary {
   box-shadow: 0 20px 60px #10172540;
 }
 
+.template-modal {
+  width: min(100%, 620px);
+  max-height: 90vh;
+  overflow-y: auto;
+  color: inherit;
+}
+
+.template-modal::backdrop {
+  background: #10172599;
+}
+
 .todo-edit-form {
   grid-template-columns: 1fr;
+}
+
+.todo-field textarea {
+  min-height: 76px;
+  padding: 9px 11px;
+  border: 1px solid #bdc7d7;
+  border-radius: 8px;
+  background: white;
+  color: #172033;
+  font: inherit;
+  resize: vertical;
+}
+
+.template-subtask-editor {
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #bdc7d7;
+  border-radius: 8px;
+}
+
+.template-subtask-list,
+.template-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.template-subtask-list li,
+.template-card-title,
+.template-actions,
+.template-subtask-add {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.template-subtask-list li > span,
+.template-card-title strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.template-subtask-list li > span {
+  flex: 1;
+}
+
+.template-subtask-add {
+  align-items: end;
+  margin-top: 12px;
+}
+
+.template-subtask-add .todo-field {
+  flex: 1;
+}
+
+.template-subtask-add button {
+  min-height: 42px;
+}
+
+.template-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  margin: 16px 0;
+  padding: 2px;
+}
+
+.template-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #d5dce7;
+  border-radius: 10px;
+}
+
+.template-card-title {
+  justify-content: space-between;
+}
+
+.template-description,
+.template-title-preview {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+
+.template-title-preview {
+  font-weight: 600;
+}
+
+.badge-category {
+  max-width: 50%;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #e8eefb;
+  color: #263d6b;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.template-badges,
+.template-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.template-actions {
+  justify-content: end;
+  margin-top: 12px;
 }
 
 .tag-selector {
@@ -728,11 +850,25 @@ button.secondary {
 
   .todo-field input,
   .todo-field select,
+  .todo-field textarea,
   .todo-filter select,
   .todo-recurrence-controls select {
     border-color: #4a5870;
     background: #101725;
     color: #edf2fb;
+  }
+
+  .template-subtask-editor {
+    border-color: #4a5870;
+  }
+
+  .template-card {
+    border-color: #4a5870;
+  }
+
+  .badge-category {
+    background: #2b3c58;
+    color: #d7e3f7;
   }
 
   .actions button.secondary {

@@ -11,6 +11,7 @@ import {
   type ReminderMinutes,
 } from './reminder-options';
 import { DUE_REMINDERS_QUERY } from './reminder-query';
+import { parseTemplateSubtasks, serializeTemplateSubtasks, templateDueDate } from './template-utils';
 import { formatSingaporeDateTime, getSingaporeNow } from './timezone';
 import type { User } from './session-token';
 
@@ -46,6 +47,42 @@ export interface Tag {
   color: string;
   created_at: string;
 }
+
+export interface TemplateSubtask {
+  title: string;
+  position: number;
+}
+
+export interface Template {
+  id: number;
+  user_id: number;
+  name: string;
+  description: string | null;
+  category: string | null;
+  title_template: string;
+  priority: Priority;
+  is_recurring: boolean;
+  recurrence_pattern: RecurrencePattern | null;
+  reminder_minutes: number | null;
+  due_date_offset_minutes: number | null;
+  subtasks_json: string | null;
+  created_at: string;
+}
+
+export interface CreateTemplateDto {
+  name: string;
+  description?: string | null;
+  category?: string | null;
+  title_template: string;
+  priority?: Priority;
+  is_recurring?: boolean;
+  recurrence_pattern?: RecurrencePattern | null;
+  reminder_minutes?: ReminderMinutes | null;
+  due_date_offset_minutes?: number | null;
+  subtasks?: TemplateSubtask[];
+}
+
+export type UpdateTemplateDto = Partial<CreateTemplateDto>;
 
 export interface CreateTagInput {
   name: string;
@@ -208,6 +245,29 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_subtasks_todo_id ON subtasks(todo_id);
 
+  CREATE TABLE IF NOT EXISTS templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    category TEXT,
+    title_template TEXT NOT NULL,
+    priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('high', 'medium', 'low')),
+    is_recurring INTEGER NOT NULL DEFAULT 0 CHECK (is_recurring IN (0, 1)),
+    recurrence_pattern TEXT CHECK (
+      recurrence_pattern IS NULL OR recurrence_pattern IN ('daily', 'weekly', 'monthly', 'yearly')
+    ),
+    reminder_minutes INTEGER CHECK (
+      reminder_minutes IS NULL OR reminder_minutes IN (15, 30, 60, 120, 1440, 2880, 10080)
+    ),
+    due_date_offset_minutes INTEGER CHECK (
+      due_date_offset_minutes IS NULL OR due_date_offset_minutes >= 1
+    ),
+    subtasks_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_templates_user_id ON templates(user_id);
+
   CREATE TABLE IF NOT EXISTS api_rate_limits (
     subject_hash TEXT NOT NULL,
     scope TEXT NOT NULL CHECK (scope IN ('auth', 'read', 'write')),
@@ -242,6 +302,12 @@ const todoSelect = `
   SELECT id, user_id, title, completed, due_date, priority, is_recurring,
     recurrence_pattern, reminder_minutes, last_notification_sent, created_at, updated_at
   FROM todos
+`;
+const templateSelect = `
+  SELECT id, user_id, name, description, category, title_template, priority,
+    is_recurring, recurrence_pattern, reminder_minutes, due_date_offset_minutes,
+    subtasks_json, created_at
+  FROM templates
 `;
 const subtaskSelect = `
   SELECT id, todo_id, title, completed, position, created_at
@@ -279,6 +345,15 @@ function mapTodo(row: TodoRow | undefined): Todo | undefined {
     is_recurring: row.is_recurring === 1,
     tags: tagDB.findByTodoId(row.id, row.user_id),
   };
+}
+
+interface TemplateRow extends Omit<Template, 'is_recurring'> {
+  is_recurring: number;
+}
+
+function mapTemplate(row: TemplateRow | undefined): Template | undefined {
+  if (!row) return undefined;
+  return { ...row, is_recurring: row.is_recurring === 1 };
 }
 
 interface SubtaskRow extends Omit<Subtask, 'completed'> {
@@ -625,6 +700,114 @@ export const tagDB = {
       }
       db.prepare('DELETE FROM todo_tags WHERE todo_id = ? AND tag_id = ?').run(todoId, tagId);
     })();
+  },
+};
+
+export const templateDB = {
+  findAllByUser(userId: number): Template[] {
+    const rows = db.prepare(`${templateSelect} WHERE user_id = ? ORDER BY name COLLATE NOCASE, id`)
+      .all(userId) as TemplateRow[];
+    return rows.map((row) => mapTemplate(row)!);
+  },
+  findByIdForUser(id: number, userId: number): Template | undefined {
+    return mapTemplate(
+      db.prepare(`${templateSelect} WHERE id = ? AND user_id = ?`).get(id, userId) as
+        | TemplateRow
+        | undefined,
+    );
+  },
+  create(userId: number, input: CreateTemplateDto): Template {
+    const subtasksJson = serializeTemplateSubtasks(input.subtasks ?? []);
+    const result = db.prepare(`
+      INSERT INTO templates (
+        user_id, name, description, category, title_template, priority, is_recurring,
+        recurrence_pattern, reminder_minutes, due_date_offset_minutes, subtasks_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      userId,
+      input.name,
+      input.description ?? null,
+      input.category ?? null,
+      input.title_template,
+      input.priority ?? 'medium',
+      input.is_recurring ? 1 : 0,
+      input.is_recurring ? input.recurrence_pattern ?? null : null,
+      input.reminder_minutes ?? null,
+      input.due_date_offset_minutes ?? null,
+      subtasksJson,
+    );
+    const template = this.findByIdForUser(Number(result.lastInsertRowid), userId);
+    if (!template) throw new Error('Template creation did not return a template');
+    return template;
+  },
+  update(id: number, userId: number, input: UpdateTemplateDto): Template | undefined {
+    const current = this.findByIdForUser(id, userId);
+    if (!current) return undefined;
+    const updates: Array<[string, string | number | null]> = [];
+    if (input.name !== undefined) updates.push(['name', input.name]);
+    if (input.description !== undefined) updates.push(['description', input.description]);
+    if (input.category !== undefined) updates.push(['category', input.category]);
+    if (input.title_template !== undefined) updates.push(['title_template', input.title_template]);
+    if (input.priority !== undefined) updates.push(['priority', input.priority]);
+    if (input.is_recurring !== undefined) {
+      updates.push(['is_recurring', input.is_recurring ? 1 : 0]);
+    }
+    if (input.recurrence_pattern !== undefined) {
+      updates.push(['recurrence_pattern', input.recurrence_pattern]);
+    } else if (input.is_recurring === false) {
+      updates.push(['recurrence_pattern', null]);
+    }
+    if (input.reminder_minutes !== undefined) {
+      updates.push(['reminder_minutes', input.reminder_minutes]);
+    }
+    if (input.due_date_offset_minutes !== undefined) {
+      updates.push(['due_date_offset_minutes', input.due_date_offset_minutes]);
+    }
+    if (input.subtasks !== undefined) {
+      updates.push(['subtasks_json', serializeTemplateSubtasks(input.subtasks)]);
+    }
+    if (updates.length === 0) return current;
+    const assignments = updates.map(([column]) => `${column} = ?`);
+    const result = db.prepare(`
+      UPDATE templates SET ${assignments.join(', ')} WHERE id = ? AND user_id = ?
+    `).run(...updates.map(([, value]) => value), id, userId);
+    if (result.changes === 0) return undefined;
+    return this.findByIdForUser(id, userId);
+  },
+  deleteForUser(id: number, userId: number): boolean {
+    return db.prepare('DELETE FROM templates WHERE id = ? AND user_id = ?')
+      .run(id, userId).changes > 0;
+  },
+  createTodoForUser(id: number, userId: number, now = getSingaporeNow()): Todo | undefined {
+    return db.transaction(() => {
+      const template = this.findByIdForUser(id, userId);
+      if (!template) return undefined;
+      if (template.is_recurring && (
+        !template.recurrence_pattern || template.due_date_offset_minutes === null
+      )) {
+        throw new Error('Recurring template is missing its pattern or due date offset');
+      }
+      if (template.reminder_minutes !== null && !isReminderMinutes(template.reminder_minutes)) {
+        throw new Error('Template has an unsupported reminder offset');
+      }
+      if (template.reminder_minutes !== null && template.due_date_offset_minutes === null) {
+        throw new Error('Template reminder is missing its due date offset');
+      }
+      const todo = todoDB.create(userId, {
+        title: template.title_template,
+        priority: template.priority,
+        due_date: template.due_date_offset_minutes === null
+          ? null
+          : templateDueDate(template.due_date_offset_minutes, now),
+        is_recurring: template.is_recurring,
+        recurrence_pattern: template.recurrence_pattern,
+        reminder_minutes: template.reminder_minutes,
+      });
+      for (const subtask of parseTemplateSubtasks(template.subtasks_json)) {
+        subtaskDB.create(todo.id, { title: subtask.title });
+      }
+      return todoDB.findByIdForUser(todo.id, userId);
+    }).immediate();
   },
 };
 
