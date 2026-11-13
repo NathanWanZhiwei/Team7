@@ -222,6 +222,7 @@ button.secondary {
     minmax(200px, 1.5fr)
     minmax(140px, 1fr)
     minmax(155px, 1fr)
+    minmax(160px, 1fr)
     auto;
   align-items: end;
   gap: 14px;
@@ -247,6 +248,47 @@ button.secondary {
   border-radius: 8px;
   background: white;
   color: #172033;
+}
+
+.todo-recurrence-controls {
+  display: flex;
+  min-width: 0;
+  min-height: 42px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 10px;
+}
+
+.todo-repeat-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #334155;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.todo-repeat-toggle input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #2459d3;
+}
+
+.todo-recurrence-controls select {
+  min-height: 36px;
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid #bdc7d7;
+  border-radius: 8px;
+  background: white;
+  color: #172033;
+}
+
+.todo-recurrence-hint {
+  color: #5f6b7d;
+  font-size: 0.72rem;
 }
 
 .todo-form > button,
@@ -390,6 +432,17 @@ button.secondary {
   color: #1e40af;
 }
 
+.recurrence-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border: 1px solid #d8b4fe;
+  border-radius: 999px;
+  background: #f3e8ff;
+  color: #6b21a8;
+}
+
 .reminder-badge {
   display: inline-flex;
   align-items: center;
@@ -398,6 +451,10 @@ button.secondary {
   border-radius: 999px;
   background: #ede9fe;
   color: #5b21b6;
+}
+
+.recurrence-badge,
+.reminder-badge {
   font-size: 0.72rem;
   font-weight: 700;
   line-height: 1.5;
@@ -582,7 +639,8 @@ button.secondary {
 
   .todo-eyebrow,
   .todo-field,
-  .todo-filter {
+  .todo-filter,
+  .todo-repeat-toggle {
     color: #c1ccdc;
   }
 
@@ -594,7 +652,8 @@ button.secondary {
 
   .todo-field input,
   .todo-field select,
-  .todo-filter select {
+  .todo-filter select,
+  .todo-recurrence-controls select {
     border-color: #4a5870;
     background: #101725;
     color: #edf2fb;
@@ -657,6 +716,16 @@ button.secondary {
     border-color: #60a5fa;
     background: #1e3a8a;
     color: #bfdbfe;
+  }
+
+  .recurrence-badge {
+    border-color: #7e22ce;
+    background: #3b0764;
+    color: #e9d5ff;
+  }
+
+  .todo-recurrence-hint {
+    color: #b4bfd0;
   }
 
   .reminder-badge {

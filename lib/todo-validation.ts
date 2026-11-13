@@ -3,6 +3,7 @@ import type {
   Priority,
   ReminderMinutes,
   RecurrencePattern,
+  Todo,
   UpdateTodoInput,
 } from './db';
 import { PRIORITY_VALUES } from './priority';
@@ -22,6 +23,17 @@ const allowedFields = new Set([
 const updateFields = new Set([...allowedFields, 'completed', 'last_notification_sent']);
 
 export type ValidationResult<T> = { value: T } | { error: string };
+
+function validateRecurrenceConfiguration(
+  isRecurring: boolean,
+  dueDate: string | null | undefined,
+  pattern: RecurrencePattern | null | undefined,
+): string | undefined {
+  if (!isRecurring) return undefined;
+  if (!dueDate) return 'Recurring todos require a due date';
+  if (!pattern || !recurrenceValues.includes(pattern)) return 'Invalid recurrence pattern';
+  return undefined;
+}
 
 export function validatePriority(
   value: unknown,
@@ -159,10 +171,19 @@ export function validateCreateTodo(
     }
     result.reminder_minutes = minutes as ReminderMinutes | null;
   }
+  const recurrenceError = validateRecurrenceConfiguration(
+    result.is_recurring ?? false,
+    result.due_date,
+    result.recurrence_pattern,
+  );
+  if (recurrenceError) return { error: recurrenceError };
   return { value: result };
 }
 
-export function validateUpdateTodo(body: unknown): ValidationResult<UpdateTodoInput> {
+export function validateUpdateTodo(
+  body: unknown,
+  current?: Pick<Todo, 'due_date' | 'is_recurring' | 'recurrence_pattern'>,
+): ValidationResult<UpdateTodoInput> {
   const parsed = validateFields(body, updateFields);
   if ('error' in parsed) return { error: parsed.error };
   if (Object.keys(parsed.value).length === 0) return { error: 'At least one field is required' };
@@ -223,6 +244,17 @@ export function validateUpdateTodo(body: unknown): ValidationResult<UpdateTodoIn
       return { error: 'last_notification_sent must be an ISO 8601 date-time' };
     }
     result.last_notification_sent = sentAt.value;
+  }
+  const recurrenceError = validateRecurrenceConfiguration(
+    result.is_recurring ?? current?.is_recurring ?? false,
+    result.due_date !== undefined ? result.due_date : current?.due_date,
+    result.recurrence_pattern !== undefined
+      ? result.recurrence_pattern
+      : current?.recurrence_pattern,
+  );
+  if (recurrenceError) return { error: recurrenceError };
+  if (result.is_recurring === false && result.recurrence_pattern === undefined) {
+    result.recurrence_pattern = null;
   }
   return { value: result };
 }

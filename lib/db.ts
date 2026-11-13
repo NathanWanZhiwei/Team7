@@ -3,6 +3,8 @@ import 'server-only';
 import Database from 'better-sqlite3';
 import { join } from 'node:path';
 import { PRIORITY_ORDER, PRIORITY_VALUES } from './priority';
+import { calculateNextDueDate } from './recurrence';
+import { isReminderMinutes } from './reminder-options';
 import type { Priority } from './priority';
 import {
   hasReminderConfigurationChanged,
@@ -83,6 +85,11 @@ export interface CreateTodoInput {
 export interface UpdateTodoInput extends Partial<CreateTodoInput> {
   completed?: boolean;
   last_notification_sent?: string;
+}
+
+export interface TodoUpdateResult {
+  todo: Todo;
+  nextInstance?: Todo;
 }
 
 interface TodoRow extends Omit<Todo, 'completed' | 'is_recurring'> {
@@ -423,6 +430,60 @@ export const todoDB = {
       .run(...updates.map(([, value]) => value), id, userId);
     if (result.changes === 0) return undefined;
     return this.findByIdForUser(id, userId);
+  },
+  updateWithRecurrenceForUser(
+    id: number,
+    userId: number,
+    input: UpdateTodoInput,
+  ): TodoUpdateResult | undefined {
+    const update = db.transaction((): TodoUpdateResult | undefined => {
+      const existing = todoDB.findByIdForUser(id, userId);
+      if (!existing) return undefined;
+
+      const todo = todoDB.updateForUser(id, userId, input);
+      if (!todo) return undefined;
+
+      if (
+        existing.completed ||
+        input.completed !== true ||
+        !todo.is_recurring ||
+        !todo.recurrence_pattern ||
+        !todo.due_date
+      ) {
+        return { todo };
+      }
+
+      const reminderMinutes = todo.reminder_minutes;
+      if (reminderMinutes !== null && !isReminderMinutes(reminderMinutes)) {
+        throw new Error('Recurring todo has an unsupported reminder offset');
+      }
+
+      const nextInstance = todoDB.create(userId, {
+        title: todo.title,
+        due_date: calculateNextDueDate(todo.due_date, todo.recurrence_pattern),
+        priority: todo.priority,
+        is_recurring: true,
+        recurrence_pattern: todo.recurrence_pattern,
+        reminder_minutes: reminderMinutes,
+      });
+      todoDB.copyTagsForTodo(todo.id, nextInstance.id, userId);
+      return { todo, nextInstance };
+    });
+    return update.immediate();
+  },
+  copyTagsForTodo(sourceTodoId: number, targetTodoId: number, userId: number): void {
+    const relationTableExists = db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'todo_tags'")
+      .get();
+    if (!relationTableExists) return;
+
+    db.prepare(`
+      INSERT OR IGNORE INTO todo_tags (todo_id, tag_id)
+      SELECT ?, todo_tags.tag_id
+      FROM todo_tags
+      JOIN tags ON tags.id = todo_tags.tag_id AND tags.user_id = ?
+      WHERE todo_tags.todo_id = ?
+    `).run(targetTodoId, userId, sourceTodoId);
   },
   deleteForUser(id: number, userId: number): boolean {
     return (
