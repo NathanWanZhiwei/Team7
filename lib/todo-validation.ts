@@ -1,10 +1,12 @@
 import type {
   CreateTodoInput,
   Priority,
+  ReminderMinutes,
   RecurrencePattern,
   UpdateTodoInput,
 } from './db';
 import { PRIORITY_VALUES } from './priority';
+import { isReminderMinutes } from './reminder-options';
 
 const recurrenceValues: RecurrencePattern[] = ['daily', 'weekly', 'monthly', 'yearly'];
 const localDateTimePattern =
@@ -17,7 +19,7 @@ const allowedFields = new Set([
   'recurrence_pattern',
   'reminder_minutes',
 ]);
-const updateFields = new Set([...allowedFields, 'completed']);
+const updateFields = new Set([...allowedFields, 'completed', 'last_notification_sent']);
 
 export type ValidationResult<T> = { value: T } | { error: string };
 
@@ -149,10 +151,13 @@ export function validateCreateTodo(
   }
   if (parsed.value.reminder_minutes !== undefined) {
     const minutes = parsed.value.reminder_minutes;
-    if (minutes !== null && (!Number.isSafeInteger(minutes) || (minutes as number) < 0)) {
-      return { error: 'reminder_minutes must be a non-negative integer or null' };
+    if (minutes !== null && !isReminderMinutes(minutes)) {
+      return { error: 'reminder_minutes must be one of the supported reminder offsets or null' };
     }
-    result.reminder_minutes = minutes as number | null;
+    if (minutes !== null && !result.due_date) {
+      return { error: 'A due date is required to set a reminder' };
+    }
+    result.reminder_minutes = minutes as ReminderMinutes | null;
   }
   return { value: result };
 }
@@ -161,6 +166,12 @@ export function validateUpdateTodo(body: unknown): ValidationResult<UpdateTodoIn
   const parsed = validateFields(body, updateFields);
   if ('error' in parsed) return { error: parsed.error };
   if (Object.keys(parsed.value).length === 0) return { error: 'At least one field is required' };
+  if (
+    parsed.value.last_notification_sent !== undefined &&
+    Object.keys(parsed.value).length !== 1
+  ) {
+    return { error: 'last_notification_sent must be updated separately' };
+  }
 
   const result: UpdateTodoInput = {};
   if (parsed.value.title !== undefined) {
@@ -198,10 +209,20 @@ export function validateUpdateTodo(body: unknown): ValidationResult<UpdateTodoIn
   }
   if (parsed.value.reminder_minutes !== undefined) {
     const minutes = parsed.value.reminder_minutes;
-    if (minutes !== null && (!Number.isSafeInteger(minutes) || (minutes as number) < 0)) {
-      return { error: 'reminder_minutes must be a non-negative integer or null' };
+    if (minutes !== null && !isReminderMinutes(minutes)) {
+      return { error: 'reminder_minutes must be one of the supported reminder offsets or null' };
     }
-    result.reminder_minutes = minutes as number | null;
+    if (minutes !== null && parsed.value.due_date === null) {
+      return { error: 'A due date is required to set a reminder' };
+    }
+    result.reminder_minutes = minutes as ReminderMinutes | null;
+  }
+  if (parsed.value.last_notification_sent !== undefined) {
+    const sentAt = normalizeDueDate(parsed.value.last_notification_sent);
+    if ('error' in sentAt || sentAt.value === null) {
+      return { error: 'last_notification_sent must be an ISO 8601 date-time' };
+    }
+    result.last_notification_sent = sentAt.value;
   }
   return { value: result };
 }

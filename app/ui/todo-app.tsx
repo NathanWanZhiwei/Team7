@@ -3,8 +3,15 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { Priority, Todo, UpdateTodoInput } from '@/lib/db';
+import {
+  isReminderMinutes,
+  REMINDER_LABELS,
+  REMINDER_OPTIONS,
+  type ReminderMinutes,
+} from '@/lib/reminder-options';
 import { sectionTodos } from '@/lib/todo-sorting';
 import { LogoutButton } from './logout-button';
+import { useNotifications } from '@/lib/hooks/useNotifications';
 
 type PriorityFilter = Priority | 'all';
 
@@ -57,12 +64,22 @@ function dueDateFromInput(value: string): string | null {
   return value ? `${value}:00.000+08:00` : null;
 }
 
+function reminderFromInput(value: string): ReminderMinutes | null {
+  const minutes = Number(value);
+  return value && isReminderMinutes(minutes) ? minutes : null;
+}
+
 function PriorityBadge({ priority }: { priority: Priority }) {
   return (
     <span className={`priority-badge priority-badge--${priority}`}>
       {priorityLabels[priority]}
     </span>
   );
+}
+
+function ReminderBadge({ minutes }: { minutes: number | null }) {
+  if (!isReminderMinutes(minutes)) return null;
+  return <span className="reminder-badge">🔔 {REMINDER_LABELS[minutes]}</span>;
 }
 
 function TodoSection({
@@ -107,6 +124,7 @@ function TodoSection({
                     {todo.title}
                   </span>
                   <PriorityBadge priority={todo.priority} />
+                  <ReminderBadge minutes={todo.reminder_minutes} />
                 </div>
                 {todo.due_date && (
                   <time className="todo-due" dateTime={todo.due_date}>
@@ -141,6 +159,7 @@ function TodoSection({
 }
 
 export function TodoApp({ userId, username }: { userId: number; username: string }) {
+  const notifications = useNotifications();
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -148,12 +167,16 @@ export function TodoApp({ userId, username }: { userId: number; username: string
   const [createTitle, setCreateTitle] = useState('');
   const [createDueDate, setCreateDueDate] = useState('');
   const [createPriority, setCreatePriority] = useState<Priority>('medium');
+  const [createReminderMinutes, setCreateReminderMinutes] =
+    useState<ReminderMinutes | null>(null);
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [editingTodo, setEditingTodo] = useState<Todo | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDueDate, setEditDueDate] = useState('');
   const [editPriority, setEditPriority] = useState<Priority>('medium');
+  const [editReminderMinutes, setEditReminderMinutes] =
+    useState<ReminderMinutes | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -204,6 +227,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       title: createTitle.trim(),
       due_date: dueDateFromInput(createDueDate),
       priority: createPriority,
+      reminder_minutes: createReminderMinutes,
     };
     const optimisticTodo: Todo = {
       id: temporaryId,
@@ -214,7 +238,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       priority: input.priority,
       is_recurring: false,
       recurrence_pattern: null,
-      reminder_minutes: null,
+      reminder_minutes: input.reminder_minutes,
       last_notification_sent: null,
       created_at: new Date().toISOString(),
       updated_at: null,
@@ -233,6 +257,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       setCreateTitle('');
       setCreateDueDate('');
       setCreatePriority('medium');
+      setCreateReminderMinutes(null);
     } catch (createError) {
       setTodos((current) => current.filter((todo) => todo.id !== temporaryId));
       setError(getErrorMessage(createError, 'Could not create todo. Please try again.'));
@@ -289,6 +314,9 @@ export function TodoApp({ userId, username }: { userId: number; username: string
     setEditTitle(todo.title);
     setEditDueDate(singaporeInputValue(todo.due_date));
     setEditPriority(todo.priority);
+    setEditReminderMinutes(
+      isReminderMinutes(todo.reminder_minutes) ? todo.reminder_minutes : null,
+    );
     setError(null);
   }
 
@@ -299,6 +327,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       title: editTitle.trim(),
       due_date: dueDateFromInput(editDueDate),
       priority: editPriority,
+      reminder_minutes: editReminderMinutes,
     });
     if (updated) setEditingTodo(null);
   }
@@ -313,10 +342,30 @@ export function TodoApp({ userId, username }: { userId: number; username: string
             <p className="muted">Signed in as <strong>{username}</strong></p>
           </div>
           <div className="todo-header-actions">
+            <button
+              type="button"
+              className={
+                notifications.permission === 'granted'
+                  ? 'notification-button notification-button--enabled'
+                  : 'notification-button'
+              }
+              disabled={!notifications.supported || notifications.permission === 'granted'}
+              aria-pressed={notifications.permission === 'granted'}
+              onClick={() => void notifications.requestPermission()}
+            >
+              {!notifications.supported
+                ? 'Notifications unavailable'
+                : notifications.permission === 'granted'
+                  ? '🔔 Notifications On'
+                  : '🔔 Enable Notifications'}
+            </button>
             <Link href="/settings/passkeys">Manage passkeys</Link>
             <LogoutButton />
           </div>
         </header>
+        {notifications.error && (
+          <p className="todo-error" role="alert">{notifications.error}</p>
+        )}
 
         <section className="todo-card todo-create-card" aria-labelledby="create-todo-heading">
           <h2 id="create-todo-heading">Add a todo</h2>
@@ -336,7 +385,10 @@ export function TodoApp({ userId, username }: { userId: number; username: string
               <input
                 type="datetime-local"
                 value={createDueDate}
-                onChange={(event) => setCreateDueDate(event.target.value)}
+                onChange={(event) => {
+                  setCreateDueDate(event.target.value);
+                  if (!event.target.value) setCreateReminderMinutes(null);
+                }}
               />
             </label>
             <label className="todo-field">
@@ -349,6 +401,22 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                   <option key={priority} value={priority}>
                     {priorityLabels[priority]}
                   </option>
+                ))}
+              </select>
+            </label>
+            <label className="todo-field">
+              Reminder
+              <select
+                aria-label="Reminder"
+                value={createReminderMinutes ?? ''}
+                disabled={!createDueDate}
+                onChange={(event) =>
+                  setCreateReminderMinutes(reminderFromInput(event.target.value))
+                }
+              >
+                <option value="">None</option>
+                {REMINDER_OPTIONS.map(({ minutes, label }) => (
+                  <option key={minutes} value={minutes}>{label}</option>
                 ))}
               </select>
             </label>
@@ -444,7 +512,10 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 <input
                   type="datetime-local"
                   value={editDueDate}
-                  onChange={(event) => setEditDueDate(event.target.value)}
+                  onChange={(event) => {
+                    setEditDueDate(event.target.value);
+                    if (!event.target.value) setEditReminderMinutes(null);
+                  }}
                 />
               </label>
               <label className="todo-field">
@@ -457,6 +528,22 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                     <option key={priority} value={priority}>
                       {priorityLabels[priority]}
                     </option>
+                  ))}
+                </select>
+              </label>
+              <label className="todo-field">
+                Reminder
+                <select
+                  aria-label="Edit reminder"
+                  value={editReminderMinutes ?? ''}
+                  disabled={!editDueDate}
+                  onChange={(event) =>
+                    setEditReminderMinutes(reminderFromInput(event.target.value))
+                  }
+                >
+                  <option value="">None</option>
+                  {REMINDER_OPTIONS.map(({ minutes, label }) => (
+                    <option key={minutes} value={minutes}>{label}</option>
                   ))}
                 </select>
               </label>

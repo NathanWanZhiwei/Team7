@@ -49,6 +49,18 @@ export async function PUT(
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
+  if (parsed.value.reminder_minutes != null) {
+    const current = todoDB.findByIdForUser(id, session.userId);
+    if (!current) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
+    const dueDate =
+      parsed.value.due_date !== undefined ? parsed.value.due_date : current.due_date;
+    if (!dueDate) {
+      return NextResponse.json(
+        { error: 'A due date is required to set a reminder' },
+        { status: 400 },
+      );
+    }
+  }
   const todo = todoDB.updateForUser(id, session.userId, parsed.value);
   if (!todo) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
   return NextResponse.json(todo);

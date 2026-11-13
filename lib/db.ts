@@ -4,10 +4,18 @@ import Database from 'better-sqlite3';
 import { join } from 'node:path';
 import { PRIORITY_ORDER, PRIORITY_VALUES } from './priority';
 import type { Priority } from './priority';
+import {
+  hasReminderConfigurationChanged,
+  type ReminderMinutes,
+} from './reminder-options';
+import { DUE_REMINDERS_QUERY } from './reminder-query';
+import { formatSingaporeDateTime, getSingaporeNow } from './timezone';
 import type { User } from './session-token';
 
 export { PRIORITY_ORDER, PRIORITY_VALUES };
 export type { Priority };
+export { REMINDER_LABELS, REMINDER_OPTIONS } from './reminder-options';
+export type { ReminderMinutes } from './reminder-options';
 
 export interface Authenticator {
   id: number;
@@ -50,11 +58,12 @@ export interface CreateTodoInput {
   priority?: Priority;
   is_recurring?: boolean;
   recurrence_pattern?: RecurrencePattern | null;
-  reminder_minutes?: number | null;
+  reminder_minutes?: ReminderMinutes | null;
 }
 
 export interface UpdateTodoInput extends Partial<CreateTodoInput> {
   completed?: boolean;
+  last_notification_sent?: string;
 }
 
 interface TodoRow extends Omit<Todo, 'completed' | 'is_recurring'> {
@@ -106,7 +115,9 @@ db.exec(`
     recurrence_pattern TEXT CHECK (
       recurrence_pattern IS NULL OR recurrence_pattern IN ('daily', 'weekly', 'monthly', 'yearly')
     ),
-    reminder_minutes INTEGER CHECK (reminder_minutes IS NULL OR reminder_minutes >= 0),
+    reminder_minutes INTEGER CHECK (
+      reminder_minutes IS NULL OR reminder_minutes IN (15, 30, 60, 120, 1440, 2880, 10080)
+    ),
     last_notification_sent TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT
@@ -197,6 +208,12 @@ export const todoDB = {
       .all(userId) as TodoRow[];
     return rows.map((row) => mapTodo(row)!);
   },
+  findDueRemindersForUser(userId: number, now = getSingaporeNow()): Todo[] {
+    const rows = db
+      .prepare(DUE_REMINDERS_QUERY)
+      .all(userId, formatSingaporeDateTime(now)) as TodoRow[];
+    return rows.map((row) => mapTodo(row)!);
+  },
   findByIdForUser(id: number, userId: number): Todo | undefined {
     return mapTodo(
       db.prepare(`${todoSelect} WHERE id = ? AND user_id = ?`).get(id, userId) as
@@ -205,6 +222,8 @@ export const todoDB = {
     );
   },
   updateForUser(id: number, userId: number, input: UpdateTodoInput): Todo | undefined {
+    const current = this.findByIdForUser(id, userId);
+    if (!current) return undefined;
     const updates: Array<[string, string | number | null]> = [];
     if (input.title !== undefined) updates.push(['title', input.title]);
     if (input.completed !== undefined) updates.push(['completed', input.completed ? 1 : 0]);
@@ -219,9 +238,17 @@ export const todoDB = {
     if (input.reminder_minutes !== undefined) {
       updates.push(['reminder_minutes', input.reminder_minutes]);
     }
+    if (input.last_notification_sent !== undefined) {
+      updates.push(['last_notification_sent', input.last_notification_sent]);
+    } else if (input.due_date === null && input.reminder_minutes === undefined) {
+      updates.push(['reminder_minutes', null]);
+    }
     if (updates.length === 0) return this.findByIdForUser(id, userId);
 
     const assignments = updates.map(([column]) => `${column} = ?`);
+    if (hasReminderConfigurationChanged(current, input)) {
+      assignments.push('last_notification_sent = NULL');
+    }
     assignments.push("updated_at = datetime('now')");
     const result = db
       .prepare(

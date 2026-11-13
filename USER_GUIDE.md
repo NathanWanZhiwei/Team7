@@ -202,11 +202,11 @@ Todos with reminders show a **🔔 badge** with abbreviated time:
 - `🔔 1w` - 1 week
 
 ### How It Works
-- System checks every minute for pending reminders
-- Notification sent when reminder time arrives
-- Each reminder only sent once (tracked via `last_notification_sent`)
-- Notifications persist until acknowledged
-- Works even if browser tab is in background
+- While the app is open in a tab, it checks for due reminders every 30 seconds.
+- A reminder fires when its window opens and is tracked through `last_notification_sent`.
+- Editing a todo's due date or reminder timing re-arms its reminder.
+- Background tabs can poll, but reminders do not fire when the app is closed.
+- Multiple tabs may race; notifications use a shared tag to coalesce duplicates where supported.
 
 ---
 
