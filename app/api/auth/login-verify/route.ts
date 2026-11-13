@@ -3,6 +3,7 @@ import {
   type AuthenticationResponseJSON,
 } from '@simplewebauthn/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { checkApiRateLimit } from '@/lib/api-rate-limit';
 import { createSession } from '@/lib/auth';
 import { authenticatorDB, challengeDB, userDB } from '@/lib/db';
 import { getWebAuthnConfig, isValidUsername, normalizeCredentialId } from '@/lib/webauthn';
@@ -10,6 +11,9 @@ import { getWebAuthnConfig, isValidUsername, normalizeCredentialId } from '@/lib
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
+  const rateLimitResponse = checkApiRateLimit(request, 'auth');
+  if (rateLimitResponse) return rateLimitResponse;
+
   let body: { username?: unknown; response?: unknown };
   try {
     body = await request.json();

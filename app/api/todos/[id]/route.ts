@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { checkApiRateLimit } from '@/lib/api-rate-limit';
 import { getSession } from '@/lib/auth';
 import { todoDB } from '@/lib/db';
+import { isReminderMinutes } from '@/lib/reminder-options';
 import { validateUpdateTodo } from '@/lib/todo-validation';
 import { rejectCrossOrigin, tagError } from '@/lib/tag-api';
 
@@ -20,10 +22,12 @@ async function getTodoId(params: Promise<{ id: string }>): Promise<number | null
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
+  const rateLimitResponse = checkApiRateLimit(request, 'read', session?.userId);
+  if (rateLimitResponse) return rateLimitResponse;
   if (!session) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
@@ -39,33 +43,69 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
+  const rateLimitResponse = checkApiRateLimit(request, 'write', session?.userId);
+  if (rateLimitResponse) return rateLimitResponse;
   if (!session) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
   const id = await getTodoId(params);
   if (id === null) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
 
-  const body = await readJson(request);
   const rejected = rejectCrossOrigin(request);
   if (rejected) return rejected;
-  const parsed = validateUpdateTodo(body);
+  const body = await readJson(request);
+  const existing = todoDB.findByIdForUser(id, session.userId);
+  if (!existing) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
+
+  const parsed = validateUpdateTodo(body, existing);
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
   try {
-    const todo = todoDB.updateForUser(id, session.userId, parsed.value);
-    if (!todo) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
-    return NextResponse.json(todo);
+    if (
+      parsed.value.completed === true &&
+      !existing.completed &&
+      existing.is_recurring
+    ) {
+      const reminderMinutes =
+        parsed.value.reminder_minutes !== undefined
+          ? parsed.value.reminder_minutes
+          : existing.reminder_minutes;
+      if (reminderMinutes !== null && !isReminderMinutes(reminderMinutes)) {
+        return NextResponse.json(
+          {
+            error:
+              'Choose a supported reminder offset before completing this recurring todo.',
+          },
+          { status: 409 },
+        );
+      }
+    }
+    if (parsed.value.reminder_minutes != null) {
+      const dueDate =
+        parsed.value.due_date !== undefined ? parsed.value.due_date : existing.due_date;
+      if (!dueDate) {
+        return NextResponse.json(
+          { error: 'A due date is required to set a reminder' },
+          { status: 400 },
+        );
+      }
+    }
+    const result = todoDB.updateWithRecurrenceForUser(id, session.userId, parsed.value);
+    if (!result) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
+    return NextResponse.json(result);
   } catch (error) {
     return tagError(error);
   }
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
+  const rateLimitResponse = checkApiRateLimit(request, 'write', session?.userId);
+  if (rateLimitResponse) return rateLimitResponse;
   if (!session) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }

@@ -2,7 +2,7 @@
 
 ## Current Repository State
 
-This repository contains the planning and reference documentation for the Todo App plus its initial Next.js implementation: passwordless WebAuthn authentication, JWT sessions, SQLite user/authenticator storage, login and passkey-management pages, route protection, user-scoped Todo CRUD APIs, a priority-aware todo list, and user-owned tags with management, multi-select assignment, and combined tag/priority filtering. Tag unit/integration and Playwright acceptance tests are available. The remaining product features are still specified in `PRPs/*.md` and have not yet been implemented.
+This repository contains the planning and reference documentation for the Todo App plus its Next.js implementation: passwordless WebAuthn authentication, JWT sessions, SQLite user/authenticator storage, login and passkey-management pages, route protection, user-scoped Todo CRUD APIs, a priority-aware todo list with sorting, badges, and filtering, user-owned tags with management, multi-select assignment, and combined tag/priority filtering, subtasks with progress tracking, recurring todos with Singapore-local date calculations and atomic next-instance creation, and browser reminders. The remaining product features are still specified in `PRPs/*.md` and have not yet been implemented.
 
 The architecture below describes the conventions the app must follow as it grows. Before implementing a feature, inspect the existing source and extend it rather than scaffolding a duplicate project.
 
@@ -77,6 +77,8 @@ export async function GET/POST/PUT/DELETE(request: NextRequest) {
   // Use session.userId for all DB queries
 }
 ```
+
+Apply `checkApiRateLimit` to every API handler before processing its request. Defaults are 10 unauthenticated/auth requests per IP per 10 minutes, 120 authenticated reads per user per minute, and 60 authenticated writes per user per minute; limited requests return `429` with `Retry-After`. Client IPs come from `x-real-ip` or `x-forwarded-for`, so production must use a trusted proxy that overwrites these headers. Counters live in the SQLite database: this policy is shared only by app instances using the same database, so local SQLite deployments must remain single-instance.
 
 ### 5. Feature-Rich Todo Model
 Todos support: priority (high/medium/low), recurring patterns (daily/weekly/monthly/yearly), reminders (15m/30m/1h/2h/1d/2d/1w before), subtasks with progress tracking, and tags.

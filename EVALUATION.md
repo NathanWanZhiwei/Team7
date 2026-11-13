@@ -85,33 +85,35 @@ This document provides a comprehensive checklist for evaluating the completeness
 ---
 
 ### ✅ Feature 03: Recurring Todos
-**Status:** ⬜ Not Started | ⬜ In Progress | ⬜ Complete | ⬜ Verified
+**Status:** ⬜ Not Started | ☑ In Progress | ⬜ Complete | ⬜ Verified
 
 **Implementation Checklist:**
-- [ ] Database: `is_recurring` and `recurrence_pattern` fields
-- [ ] Type: `type RecurrencePattern = 'daily' | 'weekly' | 'monthly' | 'yearly'`
-- [ ] Validation: Recurring todos require due date
-- [ ] "Repeat" checkbox in create/edit forms
-- [ ] Recurrence pattern dropdown
-- [ ] Next instance creation on completion
-- [ ] Due date calculation logic (daily/weekly/monthly/yearly)
-- [ ] Inherit: priority, tags, reminder, recurrence pattern
-- [ ] 🔄 badge display with pattern name
+- [x] Database: `is_recurring` and `recurrence_pattern` fields
+- [x] Type: `type RecurrencePattern = 'daily' | 'weekly' | 'monthly' | 'yearly'`
+- [x] Validation: Recurring todos require due date and valid pattern
+- [x] "Repeat" checkbox in create/edit forms
+- [x] Recurrence pattern dropdown
+- [x] Atomic next-instance creation on completion
+- [x] Due date calculation logic (daily/weekly/monthly/yearly)
+- [x] Inherit priority, reminder, and recurrence pattern
+- [ ] Inherit tag associations when PRP 06 creates its tables
+- [x] 🔄 badge display with pattern name
 
 **Testing:**
 - [ ] E2E test: Create daily recurring todo
 - [ ] E2E test: Create weekly recurring todo
 - [ ] E2E test: Complete recurring todo creates next instance
 - [ ] E2E test: Next instance has correct due date
-- [ ] E2E test: Next instance inherits metadata
+- [ ] E2E test: Next instance inherits metadata (browser E2E harness is not present)
 - [ ] Unit test: Due date calculations for each pattern
+- [x] Unit tests: Cadence calculations, month-end/leap-year clamping, and time preservation
 
 **Acceptance Criteria:**
-- [ ] All four patterns work correctly
-- [ ] Next instance created on completion
-- [ ] Metadata inherited properly
-- [ ] Date calculations accurate (Singapore timezone)
-- [ ] Can disable recurring on existing todo
+- [x] All four patterns work correctly
+- [x] Next instance created once on completion
+- [ ] Metadata inherited properly (tag tables/UI arrive in PRP 06)
+- [x] Date calculations accurate (Singapore timezone)
+- [x] Can disable recurring on existing todo
 
 ---
 

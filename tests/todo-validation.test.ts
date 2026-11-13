@@ -73,3 +73,69 @@ test('updates allow partial fields but reject invalid or empty updates', () => {
   assert.equal(getError(validateUpdateTodo({ title: '  ' })), 'Title cannot be empty');
   assert.equal(getError(validateUpdateTodo({})), 'At least one field is required');
 });
+
+test('recurring todos require a due date and a valid cadence', () => {
+  const now = Date.UTC(2026, 0, 1);
+  assert.equal(
+    getError(validateCreateTodo({ title: 'Habit', is_recurring: true, recurrence_pattern: 'daily' }, now)),
+    'Recurring todos require a due date',
+  );
+  assert.equal(
+    getError(
+      validateCreateTodo(
+        {
+          title: 'Habit',
+          due_date: '2026-01-01T09:00',
+          is_recurring: true,
+          recurrence_pattern: 'hourly',
+        },
+        now,
+      ),
+    ),
+    'recurrence_pattern must be daily, weekly, monthly, yearly, or null',
+  );
+  assert.deepEqual(
+    validateCreateTodo(
+      {
+        title: 'Habit',
+        due_date: '2026-01-01T09:00',
+        is_recurring: true,
+        recurrence_pattern: 'daily',
+      },
+      now,
+    ),
+    {
+      value: {
+        title: 'Habit',
+        due_date: '2026-01-01T09:00:00.000+08:00',
+        priority: 'medium',
+        is_recurring: true,
+        recurrence_pattern: 'daily',
+      },
+    },
+  );
+});
+
+test('recurrence updates validate the merged state and clear the cadence when disabled', () => {
+  const current = {
+    due_date: '2026-01-01T09:00:00.000+08:00',
+    is_recurring: true,
+    recurrence_pattern: 'weekly' as const,
+  };
+  assert.equal(
+    getError(validateUpdateTodo({ due_date: null }, current)),
+    'Recurring todos require a due date',
+  );
+  assert.deepEqual(validateUpdateTodo({ is_recurring: false, due_date: null }, current), {
+    value: { is_recurring: false, due_date: null, recurrence_pattern: null },
+  });
+  assert.equal(
+    getError(
+      validateUpdateTodo(
+        { is_recurring: true },
+        { due_date: current.due_date, is_recurring: false, recurrence_pattern: null },
+      ),
+    ),
+    'Invalid recurrence pattern',
+  );
+});

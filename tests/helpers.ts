@@ -1,6 +1,9 @@
 import { expect, type Page } from '@playwright/test';
 
 export async function register(page: Page) {
+  await page.context().setExtraHTTPHeaders({
+    'x-real-ip': `e2e-${crypto.randomUUID()}`,
+  });
   const session = await page.context().newCDPSession(page);
   await session.send('WebAuthn.enable');
   await session.send('WebAuthn.addVirtualAuthenticator', {
