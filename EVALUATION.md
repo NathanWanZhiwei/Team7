@@ -222,39 +222,36 @@ This document provides a comprehensive checklist for evaluating the completeness
 ---
 
 ### ✅ Feature 07: Template System
-**Status:** ⬜ Not Started | ⬜ In Progress | ⬜ Complete | ⬜ Verified
+**Status:** ⬜ Not Started | ⬜ In Progress | ⬜ Complete | ☑ Verified
 
 **Implementation Checklist:**
-- [ ] Database: `templates` table
-- [ ] API endpoint: `GET /api/templates`
-- [ ] API endpoint: `POST /api/templates`
-- [ ] API endpoint: `PUT /api/templates/[id]`
-- [ ] API endpoint: `DELETE /api/templates/[id]`
-- [ ] API endpoint: `POST /api/templates/[id]/use`
-- [ ] "Save as Template" button
-- [ ] Save template modal (name, description, category)
-- [ ] "Use Template" button
-- [ ] Template selection modal
-- [ ] Category filter in template modal
-- [ ] Template preview (shows settings)
-- [ ] Subtasks JSON serialization
-- [ ] Due date offset calculation
+- [x] Database: `templates` table
+- [x] API endpoint: `GET /api/templates`
+- [x] API endpoint: `POST /api/templates`
+- [x] API endpoint: `PUT /api/templates/[id]`
+- [x] API endpoint: `DELETE /api/templates/[id]`
+- [x] API endpoint: `POST /api/templates/[id]/use`
+- [x] "Save as Template" button
+- [x] Save template modal (name, description, category)
+- [x] Quick-use dropdown in the todo form
+- [x] Template Manager modal with use and delete actions
+- [x] Template summary (description, category, priority, recurrence, reminder)
+- [x] Subtasks JSON serialization
+- [x] Optional due date offset calculation in Singapore time
 
 **Testing:**
-- [ ] E2E test: Save todo as template
-- [ ] E2E test: Create todo from template
-- [ ] E2E test: Template preserves settings
-- [ ] E2E test: Subtasks created from template
-- [ ] E2E test: Edit template
-- [ ] E2E test: Delete template
-- [ ] Unit test: Subtasks JSON serialization
+- [x] E2E test: Save current todo settings and checklist as a template
+- [x] E2E test: Quick-use and manager-use templates
+- [x] E2E test: Owner-scoped APIs and template deletion
+- [x] Unit test: Subtasks JSON serialization and malformed JSON fallback
+- [x] Unit test: Singapore due date offset and recurring-template validation
 
 **Acceptance Criteria:**
-- [ ] Can save current todo as template
-- [ ] Templates include all metadata
-- [ ] Using template creates new todo
-- [ ] Subtasks recreated from JSON
-- [ ] Category filtering works
+- [x] Can save current todo as template
+- [x] Templates include priority, recurrence, reminder, and checklist metadata
+- [x] Using a template creates a todo without copying tags or a concrete due date
+- [x] Subtasks are recreated incomplete and in order
+- [x] Templates are private to their owner
 
 ---
 

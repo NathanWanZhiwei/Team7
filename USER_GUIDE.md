@@ -357,6 +357,8 @@ Save frequently used todo patterns as reusable templates for instant creation of
    - **Name**: Template identifier (required)
    - **Description**: Purpose/details (optional)
    - **Category**: Group similar templates (optional)
+   - **Due date offset**: Minutes from each use to the new todo's due date (optional)
+   - **Checklist**: Add the subtask titles to recreate on every use (optional)
 4. Click **"Save Template"**
 5. Template saved to your library
 
@@ -410,13 +412,14 @@ Templates preserve:
 - ✅ Recurrence settings (enabled/disabled)
 - ✅ Recurrence pattern (daily/weekly/monthly/yearly)
 - ✅ Reminder timing (minutes before due)
+- ✅ Subtask checklist (titles and order; recreated incomplete)
+- ✅ Optional relative due date offset
 - ✅ Category information
 - ✅ Description
 
 **Note**: Templates do NOT include:
-- ❌ Specific due dates (you set when creating)
-- ❌ Tags (selected when creating from template)
-- ❌ Subtasks (added after creation)
+- ❌ A concrete due date (the optional offset is recalculated from each use)
+- ❌ Tags (add tags to each created todo separately)
 
 ### Template Categories
 
