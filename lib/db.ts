@@ -2,7 +2,12 @@ import 'server-only';
 
 import Database from 'better-sqlite3';
 import { join } from 'node:path';
+import { PRIORITY_ORDER, PRIORITY_VALUES } from './priority';
+import type { Priority } from './priority';
 import type { User } from './session-token';
+
+export { PRIORITY_ORDER, PRIORITY_VALUES };
+export type { Priority };
 
 export interface Authenticator {
   id: number;
@@ -22,7 +27,6 @@ interface Challenge {
   expires_at: number;
 }
 
-export type Priority = 'high' | 'medium' | 'low';
 export type RecurrencePattern = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 export interface Todo {

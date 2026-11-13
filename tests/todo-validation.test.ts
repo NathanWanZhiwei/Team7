@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   normalizeDueDate,
   validateCreateTodo,
+  validatePriority,
   validateUpdateTodo,
 } from '../lib/todo-validation';
 
@@ -12,7 +13,7 @@ function getError<T>(result: { value: T } | { error: string }): string | undefin
 
 test('create requires a non-empty trimmed title and defaults other fields', () => {
   assert.deepEqual(validateCreateTodo({ title: '  Plan  ' }), {
-    value: { title: 'Plan' },
+    value: { title: 'Plan', priority: 'medium' },
   });
   assert.equal(getError(validateCreateTodo({ title: '   ' })), 'Title is required');
   assert.equal(getError(validateCreateTodo({ title: 'Plan', due_date: null })), undefined);
@@ -20,8 +21,28 @@ test('create requires a non-empty trimmed title and defaults other fields', () =
     getError(validateCreateTodo({ title: 'Plan', completed: true })) ?? '',
     /Unknown field/,
   );
+  assert.deepEqual(validateCreateTodo({ title: 'Plan', priority: null }), {
+    value: { title: 'Plan', priority: 'medium' },
+  });
 });
 
+test('priority validation defaults only on create and rejects invalid values', () => {
+  assert.deepEqual(validatePriority(undefined, true), { value: 'medium' });
+  assert.deepEqual(validatePriority(null, true), { value: 'medium' });
+  assert.deepEqual(validatePriority('high'), { value: 'high' });
+  assert.equal(
+    getError(validatePriority(null)),
+    "Invalid priority: null. Must be 'high', 'medium', or 'low'.",
+  );
+  assert.equal(
+    getError(validatePriority('urgent', true)),
+    "Invalid priority: urgent. Must be 'high', 'medium', or 'low'.",
+  );
+  assert.equal(
+    getError(validateUpdateTodo({ priority: null })),
+    "Invalid priority: null. Must be 'high', 'medium', or 'low'.",
+  );
+});
 test('create accepts a due date at least one minute ahead and rejects an earlier one', () => {
   const now = Date.UTC(2026, 0, 1);
   assert.equal(

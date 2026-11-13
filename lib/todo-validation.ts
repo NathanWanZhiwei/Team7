@@ -4,8 +4,8 @@ import type {
   RecurrencePattern,
   UpdateTodoInput,
 } from './db';
+import { PRIORITY_VALUES } from './priority';
 
-const priorityValues: Priority[] = ['high', 'medium', 'low'];
 const recurrenceValues: RecurrencePattern[] = ['daily', 'weekly', 'monthly', 'yearly'];
 const localDateTimePattern =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2})?$/;
@@ -20,6 +20,21 @@ const allowedFields = new Set([
 const updateFields = new Set([...allowedFields, 'completed']);
 
 export type ValidationResult<T> = { value: T } | { error: string };
+
+export function validatePriority(
+  value: unknown,
+  defaultToMedium = false,
+): ValidationResult<Priority> {
+  if (value === undefined || (defaultToMedium && value === null)) {
+    return { value: 'medium' };
+  }
+  if (typeof value === 'string' && PRIORITY_VALUES.includes(value as Priority)) {
+    return { value: value as Priority };
+  }
+  return {
+    error: `Invalid priority: ${String(value)}. Must be 'high', 'medium', or 'low'.`,
+  };
+}
 
 export function normalizeDueDate(value: unknown): ValidationResult<string | null> {
   if (value === null) return { value: null };
@@ -106,7 +121,9 @@ export function validateCreateTodo(
 
   const title = parsed.value.title;
   if (typeof title !== 'string' || !title.trim()) return { error: 'Title is required' };
-  const result: CreateTodoInput = { title: title.trim() };
+  const parsedPriority = validatePriority(parsed.value.priority, true);
+  if ('error' in parsedPriority) return { error: parsedPriority.error };
+  const result: CreateTodoInput = { title: title.trim(), priority: parsedPriority.value };
 
   if (parsed.value.due_date !== undefined) {
     const dueDate = normalizeDueDate(parsed.value.due_date);
@@ -117,12 +134,6 @@ export function validateCreateTodo(
     result.due_date = dueDate.value;
   }
 
-  if (parsed.value.priority !== undefined) {
-    if (!priorityValues.includes(parsed.value.priority as Priority)) {
-      return { error: 'Priority must be high, medium, or low' };
-    }
-    result.priority = parsed.value.priority as Priority;
-  }
   if (parsed.value.is_recurring !== undefined) {
     if (typeof parsed.value.is_recurring !== 'boolean') {
       return { error: 'is_recurring must be a boolean' };
@@ -168,10 +179,9 @@ export function validateUpdateTodo(body: unknown): ValidationResult<UpdateTodoIn
     result.due_date = dueDate.value;
   }
   if (parsed.value.priority !== undefined) {
-    if (!priorityValues.includes(parsed.value.priority as Priority)) {
-      return { error: 'Priority must be high, medium, or low' };
-    }
-    result.priority = parsed.value.priority as Priority;
+    const parsedPriority = validatePriority(parsed.value.priority);
+    if ('error' in parsedPriority) return { error: parsedPriority.error };
+    result.priority = parsedPriority.value;
   }
   if (parsed.value.is_recurring !== undefined) {
     if (typeof parsed.value.is_recurring !== 'boolean') {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { todoDB } from '@/lib/db';
-import { validateCreateTodo } from '@/lib/todo-validation';
+import { validateCreateTodo, validatePriority } from '@/lib/todo-validation';
 
 async function readJson(request: NextRequest): Promise<unknown> {
   try {
@@ -11,12 +11,20 @@ async function readJson(request: NextRequest): Promise<unknown> {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
-  return NextResponse.json(todoDB.findAllByUser(session.userId));
+  const todos = todoDB.findAllByUser(session.userId);
+  const priority = request.nextUrl.searchParams.get('priority');
+  if (priority === null) return NextResponse.json(todos);
+
+  const parsedPriority = validatePriority(priority);
+  if ('error' in parsedPriority) {
+    return NextResponse.json({ error: parsedPriority.error }, { status: 400 });
+  }
+  return NextResponse.json(todos.filter((todo) => todo.priority === parsedPriority.value));
 }
 
 export async function POST(request: NextRequest) {
