@@ -130,6 +130,24 @@ export interface Subtask {
   created_at: string;
 }
 
+export interface TodoExportItem
+  extends Omit<Todo, 'id' | 'user_id' | 'updated_at' | 'last_notification_sent' | 'subtasks' | 'tags'> {
+  subtasks: Array<Pick<Subtask, 'title' | 'completed' | 'position'>>;
+  tags: Array<Pick<Tag, 'name' | 'color'>>;
+}
+
+export interface TodoExport {
+  version: 1;
+  exported_at: string;
+  todos: TodoExportItem[];
+}
+
+export interface ImportResult {
+  imported: number;
+  tagsCreated: number;
+  tagsReused: number;
+}
+
 export interface CreateSubtaskDto {
   title: string;
 }
@@ -478,6 +496,48 @@ export const userDB = {
 };
 
 export const todoDB = {
+  importAll(userId: number, items: TodoExportItem[]): ImportResult {
+    return db.transaction(() => {
+      const tagsByName = new Map(
+        tagDB.findAllByUser(userId).map((tag) => [tag.name.toLowerCase(), tag.id]),
+      );
+      const insertTodo = db.prepare(`
+        INSERT INTO todos (
+          user_id, title, completed, due_date, priority, is_recurring,
+          recurrence_pattern, reminder_minutes, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const insertSubtask = db.prepare(
+        'INSERT INTO subtasks (todo_id, title, completed, position) VALUES (?, ?, ?, ?)',
+      );
+      const insertTag = db.prepare('INSERT INTO tags (user_id, name, color) VALUES (?, ?, ?)');
+      const linkTag = db.prepare('INSERT OR IGNORE INTO todo_tags (todo_id, tag_id) VALUES (?, ?)');
+      let tagsCreated = 0;
+      let tagsReused = 0;
+      for (const item of items) {
+        const todoId = Number(insertTodo.run(
+          userId, item.title, item.completed ? 1 : 0, item.due_date, item.priority,
+          item.is_recurring ? 1 : 0, item.recurrence_pattern, item.reminder_minutes, item.created_at,
+        ).lastInsertRowid);
+        item.subtasks.forEach((subtask, position) => {
+          insertSubtask.run(todoId, subtask.title, subtask.completed ? 1 : 0, position);
+        });
+        for (const tag of item.tags) {
+          const name = tag.name.toLowerCase();
+          let tagId = tagsByName.get(name);
+          if (tagId === undefined) {
+            tagId = Number(insertTag.run(userId, tag.name, tag.color).lastInsertRowid);
+            tagsByName.set(name, tagId);
+            tagsCreated += 1;
+          } else {
+            tagsReused += 1;
+          }
+          linkTag.run(todoId, tagId);
+        }
+      }
+      return { imported: items.length, tagsCreated, tagsReused };
+    }).immediate();
+  },
   create(userId: number, input: CreateTodoInput): Todo {
     return db.transaction(() => {
       assertOwnedTags(input.tag_ids ?? [], userId);
