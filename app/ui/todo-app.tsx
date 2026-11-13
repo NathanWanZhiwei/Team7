@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import type { Priority, Todo, UpdateTodoInput } from '@/lib/db';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import type { Priority, Tag, Todo, UpdateTodoInput } from '@/lib/db';
 import { sectionTodos } from '@/lib/todo-sorting';
+import { tagBackground } from '@/lib/tag-validation';
 import { LogoutButton } from './logout-button';
 
 type PriorityFilter = Priority | 'all';
@@ -65,6 +66,160 @@ function PriorityBadge({ priority }: { priority: Priority }) {
   );
 }
 
+function TagPill({ tag, selected = true, onClick, disabled = false }: {
+  tag: Tag;
+  selected?: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={`tag-pill${selected ? ' tag-pill--selected' : ''}`}
+      style={{ backgroundColor: selected ? tagBackground(tag.color) : undefined, borderColor: tag.color }}
+      aria-pressed={selected}
+      title={tag.name}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {selected && <span aria-hidden="true">✓</span>}
+      <span>{tag.name}</span>
+    </button>
+  );
+}
+
+function TagSelector({ tags, selected, onChange, disabled }: {
+  tags: Tag[];
+  selected: number[];
+  onChange: (ids: number[]) => void;
+  disabled: boolean;
+}) {
+  if (!tags.length) return null;
+  return (
+    <fieldset className="tag-selector" disabled={disabled}>
+      <legend>Tags</legend>
+      <div className="tag-pills">
+        {tags.map((tag) => (
+          <TagPill
+            key={tag.id}
+            tag={tag}
+            selected={selected.includes(tag.id)}
+            disabled={disabled}
+            onClick={() => onChange(selected.includes(tag.id)
+              ? selected.filter((id) => id !== tag.id) : [...selected, tag.id])}
+          />
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+function ManageTags({ tags, onSave, onDelete, onClose }: {
+  tags: Tag[];
+  onSave: (id: number | null, name: string, color: string) => Promise<void>;
+  onDelete: (tag: Tag) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [color, setColor] = useState('#3B82F6');
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => element?.close();
+  }, []);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave(editingId, name, color);
+      setName('');
+      setColor('#3B82F6');
+      setEditingId(null);
+    } catch (saveError) {
+      setError(getErrorMessage(saveError, 'Could not save tag.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(tag: Tag) {
+    if (!window.confirm(`Delete tag "${tag.name}" from all todos?`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onDelete(tag);
+      if (editingId === tag.id) {
+        setEditingId(null);
+        setName('');
+        setColor('#3B82F6');
+      }
+    } catch (deleteError) {
+      setError(getErrorMessage(deleteError, 'Could not delete tag.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <dialog
+      ref={dialog}
+      className="todo-modal tag-modal"
+      aria-labelledby="manage-tags-heading"
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onClose();
+      }}
+    >
+      <h2 id="manage-tags-heading">Manage Tags</h2>
+      {error && <p className="todo-error" role="alert">{error}</p>}
+      <ul className="tag-management-list">
+        {tags.map((tag) => (
+          <li key={tag.id}>
+            <TagPill tag={tag} onClick={() => {
+              setEditingId(tag.id); setName(tag.name); setColor(tag.color);
+            }} disabled={busy} />
+            <button type="button" className="text-button" disabled={busy} onClick={() => {
+              setEditingId(tag.id); setName(tag.name); setColor(tag.color);
+            }} aria-label={`Edit tag ${tag.name}`}>Edit</button>
+            <button type="button" className="text-button text-button--danger" disabled={busy}
+              onClick={() => void remove(tag)} aria-label={`Delete tag ${tag.name}`}>Delete</button>
+          </li>
+        ))}
+      </ul>
+      <form className="todo-form todo-edit-form" onSubmit={(event) => void save(event)}>
+        <label className="todo-field">
+          Tag name
+          <input required autoFocus value={name} disabled={busy}
+            onChange={(event) => setName(event.target.value)} />
+        </label>
+        <label className="todo-field">
+          Tag color
+          <input type="color" value={/^#[0-9a-f]{6}$/i.test(color) ? color : '#3B82F6'}
+            disabled={busy} onChange={(event) => setColor(event.target.value)} />
+        </label>
+        <label className="todo-field">
+          Hex color
+          <input required pattern="#[0-9A-Fa-f]{6}" value={color} disabled={busy}
+            onChange={(event) => setColor(event.target.value)} />
+        </label>
+        <div className="todo-modal-actions">
+          <button type="button" className="secondary" disabled={busy} onClick={onClose}>Close</button>
+          {editingId !== null && <button type="button" className="secondary" disabled={busy}
+            onClick={() => { setEditingId(null); setName(''); setColor('#3B82F6'); }}>Cancel edit</button>}
+          <button type="submit" disabled={busy}>{editingId === null ? 'Create Tag' : 'Update Tag'}</button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
 function TodoSection({
   title,
   todos,
@@ -72,6 +227,7 @@ function TodoSection({
   onToggle,
   onEdit,
   onDelete,
+  onTagFilter,
 }: {
   title: string;
   todos: Todo[];
@@ -79,6 +235,7 @@ function TodoSection({
   onToggle: (todo: Todo, completed: boolean) => void;
   onEdit: (todo: Todo) => void;
   onDelete: (todo: Todo) => void;
+  onTagFilter: (tagId: number) => void;
 }) {
   return (
     <section className="todo-section" aria-label={`${title} todos`}>
@@ -97,7 +254,7 @@ function TodoSection({
               <input
                 type="checkbox"
                 checked={todo.completed}
-                disabled={busyId === todo.id}
+                disabled={busyId === todo.id || todo.id < 0}
                 onChange={(event) => onToggle(todo, event.target.checked)}
                 aria-label={`Mark "${todo.title}" as ${todo.completed ? 'incomplete' : 'complete'}`}
               />
@@ -113,12 +270,17 @@ function TodoSection({
                     Due {dueDateFormatter.format(new Date(todo.due_date))}
                   </time>
                 )}
+                <div className="tag-pills">
+                  {todo.tags?.map((tag) => (
+                    <TagPill key={tag.id} tag={tag} onClick={() => onTagFilter(tag.id)} />
+                  ))}
+                </div>
               </div>
               <div className="todo-row-actions">
                 <button
                   type="button"
                   className="text-button"
-                  disabled={busyId === todo.id}
+                  disabled={busyId === todo.id || todo.id < 0}
                   onClick={() => onEdit(todo)}
                 >
                   Edit
@@ -126,7 +288,7 @@ function TodoSection({
                 <button
                   type="button"
                   className="text-button text-button--danger"
-                  disabled={busyId === todo.id}
+                  disabled={busyId === todo.id || todo.id < 0}
                   onClick={() => onDelete(todo)}
                 >
                   Delete
@@ -145,6 +307,11 @@ export function TodoApp({ userId, username }: { userId: number; username: string
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [tagFilter, setTagFilter] = useState<number | null>(null);
+  const [managingTags, setManagingTags] = useState(false);
+  const [createTagIds, setCreateTagIds] = useState<number[]>([]);
+  const [editTagIds, setEditTagIds] = useState<number[]>([]);
   const [createTitle, setCreateTitle] = useState('');
   const [createDueDate, setCreateDueDate] = useState('');
   const [createPriority, setCreatePriority] = useState<Priority>('medium');
@@ -159,8 +326,10 @@ export function TodoApp({ userId, username }: { userId: number; username: string
     let active = true;
     async function loadTodos() {
       try {
-        const loaded = await requestJson<Todo[]>('/api/todos');
-        if (active) setTodos(loaded);
+        const [loaded, loadedTags] = await Promise.all([
+          requestJson<Todo[]>('/api/todos'), requestJson<Tag[]>('/api/tags'),
+        ]);
+        if (active) { setTodos(loaded); setTags(loadedTags); }
       } catch (loadError) {
         if (active) setError(getErrorMessage(loadError, 'Could not load todos.'));
       } finally {
@@ -183,12 +352,36 @@ export function TodoApp({ userId, username }: { userId: number; username: string
   }, [editingTodo]);
 
   const sections = useMemo(() => {
-    const visibleTodos =
-      priorityFilter === 'all'
-        ? todos
-        : todos.filter((todo) => todo.priority === priorityFilter);
+    const visibleTodos = todos.filter((todo) =>
+      (priorityFilter === 'all' || todo.priority === priorityFilter) &&
+      (tagFilter === null || todo.tags?.some((tag) => tag.id === tagFilter)),
+    );
     return sectionTodos(visibleTodos);
-  }, [todos, priorityFilter]);
+  }, [todos, priorityFilter, tagFilter]);
+
+  async function saveTag(id: number | null, name: string, color: string) {
+    const saved = await requestJson<Tag>(id === null ? '/api/tags' : `/api/tags/${id}`, {
+      method: id === null ? 'POST' : 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color }),
+    });
+    setTags((current) => id === null ? [...current, saved]
+      : current.map((tag) => tag.id === id ? saved : tag));
+    setTodos((current) => current.map((todo) => ({
+      ...todo, tags: todo.tags?.map((tag) => tag.id === saved.id ? saved : tag),
+    })));
+  }
+
+  async function deleteTag(tag: Tag) {
+    await requestJson<{ success: boolean }>(`/api/tags/${tag.id}`, { method: 'DELETE' });
+    setTags((current) => current.filter((item) => item.id !== tag.id));
+    setTodos((current) => current.map((todo) => ({
+      ...todo, tags: todo.tags?.filter((item) => item.id !== tag.id),
+    })));
+    setCreateTagIds((current) => current.filter((id) => id !== tag.id));
+    setEditTagIds((current) => current.filter((id) => id !== tag.id));
+    setTagFilter((current) => current === tag.id ? null : current);
+  }
 
   async function createTodo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -204,6 +397,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       title: createTitle.trim(),
       due_date: dueDateFromInput(createDueDate),
       priority: createPriority,
+      tag_ids: createTagIds,
     };
     const optimisticTodo: Todo = {
       id: temporaryId,
@@ -218,6 +412,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       last_notification_sent: null,
       created_at: new Date().toISOString(),
       updated_at: null,
+      tags: tags.filter((tag) => createTagIds.includes(tag.id)),
     };
     setTodos((current) => [...current, optimisticTodo]);
 
@@ -233,6 +428,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       setCreateTitle('');
       setCreateDueDate('');
       setCreatePriority('medium');
+      setCreateTagIds([]);
     } catch (createError) {
       setTodos((current) => current.filter((todo) => todo.id !== temporaryId));
       setError(getErrorMessage(createError, 'Could not create todo. Please try again.'));
@@ -289,6 +485,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
     setEditTitle(todo.title);
     setEditDueDate(singaporeInputValue(todo.due_date));
     setEditPriority(todo.priority);
+    setEditTagIds(todo.tags?.map((tag) => tag.id) ?? []);
     setError(null);
   }
 
@@ -299,6 +496,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
       title: editTitle.trim(),
       due_date: dueDateFromInput(editDueDate),
       priority: editPriority,
+      tag_ids: editTagIds,
     });
     if (updated) setEditingTodo(null);
   }
@@ -352,10 +550,14 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 ))}
               </select>
             </label>
-            <button type="submit" disabled={creating}>
+            <button type="submit" disabled={creating || loading}>
               {creating ? 'Adding…' : 'Add todo'}
             </button>
+            <TagSelector tags={tags} selected={createTagIds}
+              onChange={setCreateTagIds} disabled={creating} />
           </form>
+          <button type="button" className="secondary" disabled={loading || creating || busyId !== null}
+            onClick={() => setManagingTags(true)}>+ Manage Tags</button>
         </section>
 
         <section className="todo-card todo-list-card" aria-labelledby="todo-list-heading">
@@ -379,6 +581,14 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 <option value="low">Low Priority</option>
               </select>
             </label>
+            <label className="todo-filter">
+              Tag filter
+              <select aria-label="Filter by tag" value={tagFilter ?? ''}
+                onChange={(event) => setTagFilter(event.target.value ? Number(event.target.value) : null)}>
+                <option value="">All Tags</option>
+                {tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
+              </select>
+            </label>
           </div>
 
           {error && <p className="todo-error" role="alert">{error}</p>}
@@ -393,6 +603,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 onToggle={(todo, completed) => void updateTodo(todo.id, { completed })}
                 onEdit={startEditing}
                 onDelete={(todo) => void deleteTodo(todo)}
+                onTagFilter={setTagFilter}
               />
               <TodoSection
                 title="Pending"
@@ -401,6 +612,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 onToggle={(todo, completed) => void updateTodo(todo.id, { completed })}
                 onEdit={startEditing}
                 onDelete={(todo) => void deleteTodo(todo)}
+                onTagFilter={setTagFilter}
               />
               <TodoSection
                 title="Completed"
@@ -409,6 +621,7 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                 onToggle={(todo, completed) => void updateTodo(todo.id, { completed })}
                 onEdit={startEditing}
                 onDelete={(todo) => void deleteTodo(todo)}
+                onTagFilter={setTagFilter}
               />
             </div>
           )}
@@ -460,6 +673,8 @@ export function TodoApp({ userId, username }: { userId: number; username: string
                   ))}
                 </select>
               </label>
+              <TagSelector tags={tags} selected={editTagIds}
+                onChange={setEditTagIds} disabled={busyId !== null} />
               <div className="todo-modal-actions">
                 <button
                   type="button"
@@ -476,6 +691,8 @@ export function TodoApp({ userId, username }: { userId: number; username: string
           </section>
         </div>
       )}
+      {managingTags && <ManageTags tags={tags} onSave={saveTag} onDelete={deleteTag}
+        onClose={() => setManagingTags(false)} />}
     </main>
   );
 }

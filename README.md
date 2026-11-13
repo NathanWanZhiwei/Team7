@@ -4,6 +4,25 @@ This walkthrough will guide you from zero to running the Todo App with GitHub Co
 
 Reference : https://ai-sdlc-workshop-day1-production.up.railway.app/login
 
+## Implemented tag system
+
+Use **+ Manage Tags** to create, rename, recolor, or delete your own tags. Deletion
+requires confirmation and removes the tag from every todo, without deleting todos.
+Select multiple tag pills when adding or editing a todo. Use **All Tags**, or click
+a todo's tag pill, to filter the list; tag and priority filters combine.
+
+Names are trimmed and unique per user. Colors must be six-digit hex values and
+default to `#3B82F6`. Bright pill backgrounds are darkened only for display to
+preserve white-text contrast of at least 4.5:1; the chosen color is retained.
+Todo create/update requests also accept `tag_ids`, saved atomically with the todo.
+
+Run `npm test`, `npm run typecheck`, and `npm run build`. For the tag browser/API
+checks, run `npx playwright install chromium` once, then `npm run test:e2e -- 08-tags`
+after building. Tests use virtual passkeys, Singapore timezone, light/dark modes,
+and a separate `tag-e2e.db` on port 3217; the normal `todos.db` is untouched.
+`TODO_DATABASE_PATH` optionally selects an alternate SQLite file, defaulting to
+`todos.db` in the project root.
+
 ---
 
 ## Table of Contents

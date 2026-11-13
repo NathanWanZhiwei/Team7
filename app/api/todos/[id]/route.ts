@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { todoDB } from '@/lib/db';
 import { validateUpdateTodo } from '@/lib/todo-validation';
+import { rejectCrossOrigin, tagError } from '@/lib/tag-api';
 
 async function readJson(request: NextRequest): Promise<unknown> {
   try {
@@ -45,13 +46,19 @@ export async function PUT(
   if (id === null) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
 
   const body = await readJson(request);
+  const rejected = rejectCrossOrigin(request);
+  if (rejected) return rejected;
   const parsed = validateUpdateTodo(body);
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const todo = todoDB.updateForUser(id, session.userId, parsed.value);
-  if (!todo) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
-  return NextResponse.json(todo);
+  try {
+    const todo = todoDB.updateForUser(id, session.userId, parsed.value);
+    if (!todo) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
+    return NextResponse.json(todo);
+  } catch (error) {
+    return tagError(error);
+  }
 }
 
 export async function DELETE(

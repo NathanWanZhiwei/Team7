@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { todoDB } from '@/lib/db';
 import { validateCreateTodo, validatePriority } from '@/lib/todo-validation';
+import { rejectCrossOrigin, tagError } from '@/lib/tag-api';
 
 async function readJson(request: NextRequest): Promise<unknown> {
   try {
@@ -34,9 +35,15 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await readJson(request);
+  const rejected = rejectCrossOrigin(request);
+  if (rejected) return rejected;
   const parsed = validateCreateTodo(body);
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  return NextResponse.json(todoDB.create(session.userId, parsed.value), { status: 201 });
+  try {
+    return NextResponse.json(todoDB.create(session.userId, parsed.value), { status: 201 });
+  } catch (error) {
+    return tagError(error);
+  }
 }

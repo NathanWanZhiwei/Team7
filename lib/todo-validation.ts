@@ -5,6 +5,7 @@ import type {
   UpdateTodoInput,
 } from './db';
 import { PRIORITY_VALUES } from './priority';
+import { validateTagIds } from './tag-validation';
 
 const recurrenceValues: RecurrencePattern[] = ['daily', 'weekly', 'monthly', 'yearly'];
 const localDateTimePattern =
@@ -16,6 +17,7 @@ const allowedFields = new Set([
   'is_recurring',
   'recurrence_pattern',
   'reminder_minutes',
+  'tag_ids',
 ]);
 const updateFields = new Set([...allowedFields, 'completed']);
 
@@ -124,6 +126,11 @@ export function validateCreateTodo(
   const parsedPriority = validatePriority(parsed.value.priority, true);
   if ('error' in parsedPriority) return { error: parsedPriority.error };
   const result: CreateTodoInput = { title: title.trim(), priority: parsedPriority.value };
+  if (parsed.value.tag_ids !== undefined) {
+    const tags = validateTagIds(parsed.value.tag_ids);
+    if ('error' in tags) return tags;
+    result.tag_ids = tags.value;
+  }
 
   if (parsed.value.due_date !== undefined) {
     const dueDate = normalizeDueDate(parsed.value.due_date);
@@ -163,6 +170,11 @@ export function validateUpdateTodo(body: unknown): ValidationResult<UpdateTodoIn
   if (Object.keys(parsed.value).length === 0) return { error: 'At least one field is required' };
 
   const result: UpdateTodoInput = {};
+  if (parsed.value.tag_ids !== undefined) {
+    const tags = validateTagIds(parsed.value.tag_ids);
+    if ('error' in tags) return tags;
+    result.tag_ids = tags.value;
+  }
   if (parsed.value.title !== undefined) {
     if (typeof parsed.value.title !== 'string' || !parsed.value.title.trim()) {
       return { error: 'Title cannot be empty' };
