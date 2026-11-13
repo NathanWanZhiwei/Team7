@@ -80,6 +80,10 @@ export interface Todo {
   subtasks?: Subtask[];
 }
 
+export interface DueReminder extends Todo {
+  reminder_revision: number;
+}
+
 export interface Subtask {
   id: number;
   todo_id: number;
@@ -189,6 +193,7 @@ db.exec(`
       reminder_minutes IS NULL OR reminder_minutes IN (15, 30, 60, 120, 1440, 2880, 10080)
     ),
     last_notification_sent TEXT,
+    reminder_revision INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT
   );
@@ -231,6 +236,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_api_rate_limits_window_start
     ON api_rate_limits(window_start);
 `);
+
+db.transaction(() => {
+  const columns = db.pragma('table_info(todos)') as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'reminder_revision')) {
+    db.exec('ALTER TABLE todos ADD COLUMN reminder_revision INTEGER NOT NULL DEFAULT 0');
+  }
+}).immediate();
 
 const userByUsername = db.prepare(
   'SELECT id, username, created_at, webauthn_user_handle FROM users WHERE username = ?',
@@ -484,11 +496,21 @@ export const todoDB = {
       .all(userId) as TodoRow[];
     return rows.map((row) => includeSubtasks(mapTodo(row))!);
   },
-  findDueRemindersForUser(userId: number, now = getSingaporeNow()): Todo[] {
+  findDueRemindersForUser(userId: number, now = getSingaporeNow()): DueReminder[] {
     const rows = db
       .prepare(DUE_REMINDERS_QUERY)
-      .all(userId, formatSingaporeDateTime(now)) as TodoRow[];
-    return rows.map((row) => mapTodo(row)!);
+      .all(userId, formatSingaporeDateTime(now)) as Array<TodoRow & { reminder_revision: number }>;
+    return rows.map((row) => ({ ...mapTodo(row)!, reminder_revision: row.reminder_revision }));
+  },
+  acknowledgeReminderForUser(id: number, userId: number, revision: number, now = getSingaporeNow()): boolean {
+    const sentAt = formatSingaporeDateTime(now);
+    return db.prepare(`
+      UPDATE todos SET last_notification_sent = ?
+      WHERE id = ? AND user_id = ? AND reminder_revision = ?
+        AND completed = 0 AND last_notification_sent IS NULL
+        AND reminder_minutes IS NOT NULL AND due_date IS NOT NULL
+        AND unixepoch(due_date, 'subsec') - reminder_minutes * 60 <= unixepoch(?, 'subsec')
+    `).run(sentAt, id, userId, revision, sentAt).changes > 0;
   },
   findByIdForUser(id: number, userId: number): Todo | undefined {
     return includeSubtasks(mapTodo(
@@ -526,6 +548,9 @@ export const todoDB = {
       const assignments = updates.map(([column]) => `${column} = ?`);
       if (hasReminderConfigurationChanged(current, input)) {
         assignments.push('last_notification_sent = NULL');
+        assignments.push('reminder_revision = reminder_revision + 1');
+      } else if (input.completed !== undefined && input.completed !== current.completed) {
+        assignments.push('reminder_revision = reminder_revision + 1');
       }
       assignments.push("updated_at = datetime('now')");
       const result = db
